@@ -97,6 +97,10 @@ service GoBgpService {
 
   rpc EnableZebra(EnableZebraRequest) returns (EnableZebraResponse);
 
+  rpc EnableNetlink(EnableNetlinkRequest) returns (EnableNetlinkResponse);
+  rpc GetRedistribution(GetRedistributionRequest) returns (GetRedistributionResponse);
+  rpc EnableRedistribution(EnableRedistributionRequest) returns(EnableRedistributionResponse);
+
   rpc EnableMrt(EnableMrtRequest) returns (EnableMrtResponse);
   rpc DisableMrt(DisableMrtRequest) returns (DisableMrtResponse);
 
@@ -105,6 +109,19 @@ service GoBgpService {
   rpc ListBmp(ListBmpRequest) returns (stream ListBmpResponse);
 
   rpc SetLogLevel(SetLogLevelRequest) returns (SetLogLevelResponse);
+}
+
+message GetRedistributionRequest {
+}
+
+message GetRedistributionResponse {
+	bool import_enabled = 1;
+	bool export_enabled = 2;
+	string vrf = 3;
+	repeated string interfaces = 4;
+	string community_name = 5;
+	repeated string community_list = 6;
+	repeated string large_community_list = 7;
 }
 
 message StartBgpRequest {
@@ -565,6 +582,29 @@ message EnableZebraRequest {
 
 message EnableZebraResponse {}
 
+message EnableRedistributionRequest {
+	string vrf = 1;
+	bool export = 2;
+	string community_name = 3;
+	repeated string community_list = 4;
+	repeated string large_community_list = 5;
+	repeated string interfaces = 6;
+}
+
+message EnableRedistributionResponse {}
+
+
+message EnableNetlinkRequest {
+       bool enabled = 1;
+       string vrf = 2;
+       repeated string interfaces = 3;
+}
+ 
+message EnableNetlinkResponse {}
+
+
+
+
 message EnableMrtRequest {
   enum DumpType {
     DUMP_TYPE_UNSPECIFIED = 0;
@@ -576,6 +616,7 @@ message EnableMrtRequest {
   uint64 dump_interval = 3;
   uint64 rotation_interval = 4;
 }
+
 
 message EnableMrtResponse {}
 

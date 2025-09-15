@@ -110,27 +110,28 @@ func newSharedData() *sharedData {
 }
 
 type BgpServer struct {
-	shared       *sharedData
-	apiServer    *server
-	bgpConfig    oc.Bgp
-	acceptCh     chan net.Conn
-	mgmtCh       chan *mgmtOp
-	policy       *table.RoutingPolicy
-	listeners    []*netutils.TCPListener
-	neighborMap  map[string]*peer
-	peerGroupMap map[string]*peerGroup
-	globalRib    *table.TableManager
-	rsRib        *table.TableManager
-	roaManager   *roaManager
-	shutdownWG   *sync.WaitGroup
-	watcherMap   map[watchEventType][]*watcher
-	zclient      *zebraClient
-	bmpManager   *bmpClientManager
-	mrtManager   *mrtManager
-	roaTable     *table.ROATable
-	uuidMap      map[string]uuid.UUID
-	logger       log.Logger
-	timingHook   FSMTimingHook
+	shared         *sharedData
+	apiServer      *server
+	bgpConfig      oc.Bgp
+	acceptCh       chan net.Conn
+	mgmtCh         chan *mgmtOp
+	policy         *table.RoutingPolicy
+	listeners      []*netutils.TCPListener
+	neighborMap    map[string]*peer
+	peerGroupMap   map[string]*peerGroup
+	globalRib      *table.TableManager
+	rsRib          *table.TableManager
+	roaManager     *roaManager
+	shutdownWG     *sync.WaitGroup
+	watcherMap     map[watchEventType][]*watcher
+	zclient        *zebraClient
+	bmpManager     *bmpClientManager
+	mrtManager     *mrtManager
+	roaTable       *table.ROATable
+	uuidMap        map[string]uuid.UUID
+	logger         log.Logger
+	timingHook     FSMTimingHook
+	netlinkClients map[string]*netlinkClient
 }
 
 func NewBgpServer(opt ...ServerOption) *BgpServer {
@@ -2005,6 +2006,60 @@ func (s *BgpServer) DeleteBmp(ctx context.Context, r *api.DeleteBmpRequest) erro
 	}, true)
 }
 
+func (s *BgpServer) startNetlink() error {
+	if s.netlinkClients == nil {
+		s.netlinkClients = make(map[string]*netlinkClient)
+	}
+	if s.bgpConfig.Netlink.Import.Enabled {
+		vrf := s.bgpConfig.Netlink.Import.Vrf
+		if _, ok := s.netlinkClients[vrf]; !ok {
+			n, err := newNetlinkClient(s, vrf)
+			if err != nil {
+				return err
+			}
+			s.netlinkClients[vrf] = n
+		}
+	}
+	if s.bgpConfig.Netlink.Export.Enabled {
+		vrf := s.bgpConfig.Netlink.Export.Vrf
+		if _, ok := s.netlinkClients[vrf]; !ok {
+			n, err := newNetlinkClient(s, vrf)
+			if err != nil {
+				return err
+			}
+			s.netlinkClients[vrf] = n
+		}
+	}
+	return nil
+}
+
+func (s *BgpServer) EnableNetlink(ctx context.Context, in *api.EnableNetlinkRequest) (*api.EnableNetlinkResponse, error) {
+	return nil, nil
+}
+
+func (s *BgpServer) GetRedistribution(ctx context.Context, in *api.GetRedistributionRequest) (*api.GetRedistributionResponse, error) {
+	return nil, nil
+}
+
+func (s *BgpServer) EnableRedistribution(ctx context.Context, in *api.EnableRedistributionRequest) (*api.EnableRedistributionResponse, error) {
+	var err error
+	s.mgmtOperation(func() error {
+		if len(in.Interfaces) > 0 {
+			s.bgpConfig.Netlink.Import.Enabled = true
+			s.bgpConfig.Netlink.Import.Vrf = in.Vrf
+			s.bgpConfig.Netlink.Import.InterfaceList = in.Interfaces
+		} else {
+			s.bgpConfig.Netlink.Export.Enabled = true
+			s.bgpConfig.Netlink.Export.Vrf = in.Vrf
+			s.bgpConfig.Netlink.Export.Community = in.CommunityName
+			s.bgpConfig.Netlink.Export.CommunityList = in.CommunityList
+			s.bgpConfig.Netlink.Export.LargeCommunityList = in.LargeCommunityList
+		}
+		return nil
+	}, true)
+	return &api.EnableRedistributionResponse{}, err
+}
+
 func (s *BgpServer) ListBmp(ctx context.Context, req *api.ListBmpRequest, fn func(*api.ListBmpResponse_BmpStation)) error {
 	if req == nil {
 		return fmt.Errorf("null request")
@@ -2531,6 +2586,10 @@ func (s *BgpServer) StartBgp(ctx context.Context, r *api.StartBgpRequest) error 
 		s.rsRib = table.NewTableManager(s.logger, rfs)
 
 		if err := s.policy.Initialize(); err != nil {
+			return err
+		}
+
+		if err := s.startNetlink(); err != nil {
 			return err
 		}
 		s.bgpConfig.Global = *c

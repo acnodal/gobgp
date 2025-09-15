@@ -299,6 +299,28 @@ func InitialConfig(ctx context.Context, bgpServer *server.BgpServer, newConfig *
 		}
 	}
 
+	if newConfig.Netlink.Import.Enabled {
+		if _, err := bgpServer.EnableRedistribution(ctx, &api.EnableRedistributionRequest{
+			Vrf:        newConfig.Netlink.Import.Vrf,
+			Interfaces: newConfig.Netlink.Import.InterfaceList,
+		}); err != nil {
+			bgpServer.Log().Fatal("failed to set netlink import config",
+				log.Fields{"Topic": "config", "Error": err})
+		}
+	}
+
+	if newConfig.Netlink.Export.Enabled {
+		if _, err := bgpServer.EnableRedistribution(ctx, &api.EnableRedistributionRequest{
+			Vrf:                newConfig.Netlink.Export.Vrf,
+			CommunityName:      newConfig.Netlink.Export.Community,
+			CommunityList:      newConfig.Netlink.Export.CommunityList,
+			LargeCommunityList: newConfig.Netlink.Export.LargeCommunityList,
+		}); err != nil {
+			bgpServer.Log().Fatal("failed to set netlink export config",
+				log.Fields{"Topic": "config", "Error": err})
+		}
+	}
+
 	if len(newConfig.Collector.Config.Url) > 0 {
 		bgpServer.Log().Fatal("collector feature is not supported",
 			log.Fields{"Topic": "config"})
