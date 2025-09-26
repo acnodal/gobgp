@@ -36,11 +36,11 @@ func TestNetlinkClient(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	_, err = newNetlinkClient(s, "")
+	_, err = newNetlinkClient(s)
 	assert.NoError(t, err)
 }
 
-func TestEnableRedistribution(t *testing.T) {
+func TestEnableNetlink(t *testing.T) {
 	s := NewBgpServer()
 	go s.Serve()
 
@@ -54,22 +54,22 @@ func TestEnableRedistribution(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Test enabling import
-	_, err = s.EnableRedistribution(context.Background(), &api.EnableRedistributionRequest{
-		Vrf:        "vrf1",
-		Interfaces: []string{"eth0", "eth1"},
-	})
+	s.bgpConfig.Netlink.Import.Enabled = true
+	s.bgpConfig.Netlink.Import.Vrf = "vrf1"
+	s.bgpConfig.Netlink.Import.InterfaceList = []string{"eth0", "eth1"}
+	err = s.StartNetlink(context.Background())
 	assert.NoError(t, err)
 	assert.True(t, s.bgpConfig.Netlink.Import.Enabled)
 	assert.Equal(t, "vrf1", s.bgpConfig.Netlink.Import.Vrf)
 	assert.Equal(t, []string{"eth0", "eth1"}, s.bgpConfig.Netlink.Import.InterfaceList)
 
 	// Test enabling export
-	_, err = s.EnableRedistribution(context.Background(), &api.EnableRedistributionRequest{
-		Vrf:                "vrf1",
-		CommunityName:      "test",
-		CommunityList:      []string{"100:100"},
-		LargeCommunityList: []string{"200:200:200"},
-	})
+	s.bgpConfig.Netlink.Export.Enabled = true
+	s.bgpConfig.Netlink.Export.Vrf = "vrf1"
+	s.bgpConfig.Netlink.Export.Community = "test"
+	s.bgpConfig.Netlink.Export.CommunityList = []string{"100:100"}
+	s.bgpConfig.Netlink.Export.LargeCommunityList = []string{"200:200:200"}
+	err = s.StartNetlink(context.Background())
 	assert.NoError(t, err)
 	assert.True(t, s.bgpConfig.Netlink.Export.Enabled)
 	assert.Equal(t, "vrf1", s.bgpConfig.Netlink.Export.Vrf)

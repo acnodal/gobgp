@@ -1,4 +1,4 @@
-# Netlink Route Redistribution
+# Netlink Integration
 
 GoBGP can integrate with the Linux kernel's routing table using Netlink. This feature allows GoBGP to import routes from the kernel (e.g., connected routes) into its own RIB and export routes from its RIB into the kernel.
 
@@ -52,14 +52,14 @@ To export routes from GoBGP's RIB into the Linux kernel's routing table, you can
 
 ### CLI Configuration
 
-You can also enable and manage redistribution dynamically using the `gobgp redistribution` command.
+You can also enable and manage netlink integration dynamically using the `gobgp netlink` command.
 
 #### Enabling Import
 
 To enable importing routes from one or more interfaces:
 
 ```bash
-gobgp redistribution enable import <interface_name> [interface_name...] [-vrf <vrf_name>]
+gobgp netlink enable import <interface_name> [interface_name...] [-vrf <vrf_name>]
 ```
 
 -   `<interface_name>`: A space-separated list of interface names or glob patterns (e.g., `eth0`, `eth*`).
@@ -68,7 +68,7 @@ gobgp redistribution enable import <interface_name> [interface_name...] [-vrf <v
 **Example:**
 
 ```bash
-gobgp redistribution enable import eth0 eth1 -vrf vrf-red
+gobgp netlink enable import eth0 eth1 -vrf vrf-red
 ```
 
 #### Enabling Export
@@ -76,7 +76,7 @@ gobgp redistribution enable import eth0 eth1 -vrf vrf-red
 To enable exporting routes from GoBGP to the kernel:
 
 ```bash
-gobgp redistribution enable export [-vrf <vrf_name>] [--community <community>] [--community-list <communities>] [--large-community-list <large_communities>]
+gobgp netlink enable export [-vrf <vrf_name>] [--community <community>] [--community-list <communities>] [--large-community-list <large_communities>]
 ```
 
 -   `-vrf`: (Optional) The VRF to export routes from.
@@ -87,27 +87,27 @@ gobgp redistribution enable export [-vrf <vrf_name>] [--community <community>] [
 **Example:**
 
 ```bash
-gobgp redistribution enable export --community 65001:100
+gobgp netlink enable export --community 65001:100
 ```
 
 ## gRPC API
 
-The Netlink redistribution feature can be controlled programmatically via the following gRPC RPCs.
+The Netlink feature can be controlled programmatically via the following gRPC RPCs.
 
-### `EnableRedistribution`
+### `EnableNetlink`
 
-Enables import or export redistribution. The request can specify either interfaces for import or community filters for export.
+Enables import or export. The request can specify either interfaces for import or community filters for export.
 
 **RPC Definition:**
 
 ```protobuf
-rpc EnableRedistribution(EnableRedistributionRequest) returns (EnableRedistributionResponse);
+rpc EnableNetlink(EnableNetlinkRequest) returns (EnableNetlinkResponse);
 ```
 
 **Request Message:**
 
 ```protobuf
-message EnableRedistributionRequest {
+message EnableNetlinkRequest {
   // (Optional) The VRF name.
   string vrf = 1;
   // (Optional) A list of interface names or glob patterns for import.
@@ -121,32 +121,26 @@ message EnableRedistributionRequest {
 }
 ```
 
-### `GetRedistribution`
+### `GetNetlink`
 
-Retrieves the current redistribution configuration.
+Retrieves the current netlink configuration.
 
 **RPC Definition:**
 
 ```protobuf
-rpc GetRedistribution(GetRedistributionRequest) returns (GetRedistributionResponse);
+rpc GetNetlink(GetNetlinkRequest) returns (GetNetlinkResponse);
 ```
 
 **Response Message:**
 
 ```protobuf
-message GetRedistributionResponse {
-  // Import configuration.
-  RedistributionInfo import = 1;
-  // Export configuration.
-  RedistributionInfo export = 2;
-}
-
-message RedistributionInfo {
-  bool enabled = 1;
-  string vrf = 2;
-  repeated string interfaces = 3;
-  string community_name = 4;
-  repeated string community_list = 5;
-  repeated string large_community_list = 6;
+message GetNetlinkResponse {
+  bool import_enabled = 1;
+  bool export_enabled = 2;
+  string vrf = 3;
+  repeated string interfaces = 4;
+  string community_name = 5;
+  repeated string community_list = 6;
+  repeated string large_community_list = 7;
 }
 ```

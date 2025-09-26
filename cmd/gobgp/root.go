@@ -110,8 +110,8 @@ func newRootCmd() *cobra.Command {
 	mrtCmd := newMrtCmd()
 	rpkiCmd := newRPKICmd()
 	bmpCmd := newBmpCmd()
-	redistributionCmd := newRedistributionCmd()
+	netlinkCmd := newNetlinkCmd()
 	logLevelCmd := newLogLevelCmd()
-	rootCmd.AddCommand(globalCmd, neighborCmd, vrfCmd, policyCmd, monitorCmd, mrtCmd, rpkiCmd, bmpCmd, redistributionCmd, logLevelCmd)
+	rootCmd.AddCommand(globalCmd, neighborCmd, vrfCmd, policyCmd, monitorCmd, mrtCmd, rpkiCmd, bmpCmd, netlinkCmd, logLevelCmd)
 	return rootCmd
 }

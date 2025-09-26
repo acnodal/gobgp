@@ -89,9 +89,8 @@ const (
 	GoBgpService_ResetRpki_FullMethodName              = "/api.GoBgpService/ResetRpki"
 	GoBgpService_ListRpkiTable_FullMethodName          = "/api.GoBgpService/ListRpkiTable"
 	GoBgpService_EnableZebra_FullMethodName            = "/api.GoBgpService/EnableZebra"
+	GoBgpService_GetNetlink_FullMethodName             = "/api.GoBgpService/GetNetlink"
 	GoBgpService_EnableNetlink_FullMethodName          = "/api.GoBgpService/EnableNetlink"
-	GoBgpService_GetRedistribution_FullMethodName      = "/api.GoBgpService/GetRedistribution"
-	GoBgpService_EnableRedistribution_FullMethodName   = "/api.GoBgpService/EnableRedistribution"
 	GoBgpService_EnableMrt_FullMethodName              = "/api.GoBgpService/EnableMrt"
 	GoBgpService_DisableMrt_FullMethodName             = "/api.GoBgpService/DisableMrt"
 	GoBgpService_AddBmp_FullMethodName                 = "/api.GoBgpService/AddBmp"
@@ -155,9 +154,8 @@ type GoBgpServiceClient interface {
 	ResetRpki(ctx context.Context, in *ResetRpkiRequest, opts ...grpc.CallOption) (*ResetRpkiResponse, error)
 	ListRpkiTable(ctx context.Context, in *ListRpkiTableRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ListRpkiTableResponse], error)
 	EnableZebra(ctx context.Context, in *EnableZebraRequest, opts ...grpc.CallOption) (*EnableZebraResponse, error)
+	GetNetlink(ctx context.Context, in *GetNetlinkRequest, opts ...grpc.CallOption) (*GetNetlinkResponse, error)
 	EnableNetlink(ctx context.Context, in *EnableNetlinkRequest, opts ...grpc.CallOption) (*EnableNetlinkResponse, error)
-	GetRedistribution(ctx context.Context, in *GetRedistributionRequest, opts ...grpc.CallOption) (*GetRedistributionResponse, error)
-	EnableRedistribution(ctx context.Context, in *EnableRedistributionRequest, opts ...grpc.CallOption) (*EnableRedistributionResponse, error)
 	EnableMrt(ctx context.Context, in *EnableMrtRequest, opts ...grpc.CallOption) (*EnableMrtResponse, error)
 	DisableMrt(ctx context.Context, in *DisableMrtRequest, opts ...grpc.CallOption) (*DisableMrtResponse, error)
 	AddBmp(ctx context.Context, in *AddBmpRequest, opts ...grpc.CallOption) (*AddBmpResponse, error)
@@ -775,30 +773,20 @@ func (c *goBgpServiceClient) EnableZebra(ctx context.Context, in *EnableZebraReq
 	return out, nil
 }
 
+func (c *goBgpServiceClient) GetNetlink(ctx context.Context, in *GetNetlinkRequest, opts ...grpc.CallOption) (*GetNetlinkResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetNetlinkResponse)
+	err := c.cc.Invoke(ctx, GoBgpService_GetNetlink_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *goBgpServiceClient) EnableNetlink(ctx context.Context, in *EnableNetlinkRequest, opts ...grpc.CallOption) (*EnableNetlinkResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(EnableNetlinkResponse)
 	err := c.cc.Invoke(ctx, GoBgpService_EnableNetlink_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *goBgpServiceClient) GetRedistribution(ctx context.Context, in *GetRedistributionRequest, opts ...grpc.CallOption) (*GetRedistributionResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetRedistributionResponse)
-	err := c.cc.Invoke(ctx, GoBgpService_GetRedistribution_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *goBgpServiceClient) EnableRedistribution(ctx context.Context, in *EnableRedistributionRequest, opts ...grpc.CallOption) (*EnableRedistributionResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(EnableRedistributionResponse)
-	err := c.cc.Invoke(ctx, GoBgpService_EnableRedistribution_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -929,9 +917,8 @@ type GoBgpServiceServer interface {
 	ResetRpki(context.Context, *ResetRpkiRequest) (*ResetRpkiResponse, error)
 	ListRpkiTable(*ListRpkiTableRequest, grpc.ServerStreamingServer[ListRpkiTableResponse]) error
 	EnableZebra(context.Context, *EnableZebraRequest) (*EnableZebraResponse, error)
+	GetNetlink(context.Context, *GetNetlinkRequest) (*GetNetlinkResponse, error)
 	EnableNetlink(context.Context, *EnableNetlinkRequest) (*EnableNetlinkResponse, error)
-	GetRedistribution(context.Context, *GetRedistributionRequest) (*GetRedistributionResponse, error)
-	EnableRedistribution(context.Context, *EnableRedistributionRequest) (*EnableRedistributionResponse, error)
 	EnableMrt(context.Context, *EnableMrtRequest) (*EnableMrtResponse, error)
 	DisableMrt(context.Context, *DisableMrtRequest) (*DisableMrtResponse, error)
 	AddBmp(context.Context, *AddBmpRequest) (*AddBmpResponse, error)
@@ -1095,14 +1082,11 @@ func (UnimplementedGoBgpServiceServer) ListRpkiTable(*ListRpkiTableRequest, grpc
 func (UnimplementedGoBgpServiceServer) EnableZebra(context.Context, *EnableZebraRequest) (*EnableZebraResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EnableZebra not implemented")
 }
+func (UnimplementedGoBgpServiceServer) GetNetlink(context.Context, *GetNetlinkRequest) (*GetNetlinkResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetNetlink not implemented")
+}
 func (UnimplementedGoBgpServiceServer) EnableNetlink(context.Context, *EnableNetlinkRequest) (*EnableNetlinkResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EnableNetlink not implemented")
-}
-func (UnimplementedGoBgpServiceServer) GetRedistribution(context.Context, *GetRedistributionRequest) (*GetRedistributionResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetRedistribution not implemented")
-}
-func (UnimplementedGoBgpServiceServer) EnableRedistribution(context.Context, *EnableRedistributionRequest) (*EnableRedistributionResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method EnableRedistribution not implemented")
 }
 func (UnimplementedGoBgpServiceServer) EnableMrt(context.Context, *EnableMrtRequest) (*EnableMrtResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EnableMrt not implemented")
@@ -1930,6 +1914,24 @@ func _GoBgpService_EnableZebra_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GoBgpService_GetNetlink_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetNetlinkRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GoBgpServiceServer).GetNetlink(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GoBgpService_GetNetlink_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GoBgpServiceServer).GetNetlink(ctx, req.(*GetNetlinkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _GoBgpService_EnableNetlink_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(EnableNetlinkRequest)
 	if err := dec(in); err != nil {
@@ -1944,42 +1946,6 @@ func _GoBgpService_EnableNetlink_Handler(srv interface{}, ctx context.Context, d
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(GoBgpServiceServer).EnableNetlink(ctx, req.(*EnableNetlinkRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _GoBgpService_GetRedistribution_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetRedistributionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(GoBgpServiceServer).GetRedistribution(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: GoBgpService_GetRedistribution_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(GoBgpServiceServer).GetRedistribution(ctx, req.(*GetRedistributionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _GoBgpService_EnableRedistribution_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(EnableRedistributionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(GoBgpServiceServer).EnableRedistribution(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: GoBgpService_EnableRedistribution_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(GoBgpServiceServer).EnableRedistribution(ctx, req.(*EnableRedistributionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2237,16 +2203,12 @@ var GoBgpService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _GoBgpService_EnableZebra_Handler,
 		},
 		{
+			MethodName: "GetNetlink",
+			Handler:    _GoBgpService_GetNetlink_Handler,
+		},
+		{
 			MethodName: "EnableNetlink",
 			Handler:    _GoBgpService_EnableNetlink_Handler,
-		},
-		{
-			MethodName: "GetRedistribution",
-			Handler:    _GoBgpService_GetRedistribution_Handler,
-		},
-		{
-			MethodName: "EnableRedistribution",
-			Handler:    _GoBgpService_EnableRedistribution_Handler,
 		},
 		{
 			MethodName: "EnableMrt",

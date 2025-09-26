@@ -1,28 +1,26 @@
 {
-	"useSmartEdit": true,
-        "checkpointing": {
-           "enabled" : true
-         },
-
-
-
-	"mcpServers": {
-		"cobra": {
-			"command": "npx",
-			"args": [
-				"-y",
-				"mcp-code-graph@latest",
-				"spf13/cobra"
-			]
-		},
-        "gobgp": {
-            "command": "npx",
-            "args": [
-                "-y",
-                "mcp-code-graph@latest",
-                "osrg/gobgp"
-            ]
-        }
-
-	}
+  "general": {
+    "checkpointing": {
+      "enabled": true
+    }
+  },
+  "mcpServers": {
+    "cobra": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-code-graph@latest",
+        "spf13/cobra"
+      ]
+    },
+    "gobgp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-code-graph@latest",
+        "osrg/gobgp"
+      ]
+    }
+  },
+  "useSmartEdit": true
 }

@@ -20,33 +20,45 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
+type NetlinkManager interface {
+	RouteList(link netlink.Link, family int) ([]netlink.Route, error)
+	RouteAdd(route *netlink.Route) error
+	LinkByName(name string) (netlink.Link, error)
+}
+
+type DefaultNetlinkManager struct{}
+
+func (m *DefaultNetlinkManager) RouteList(link netlink.Link, family int) ([]netlink.Route, error) {
+	return netlink.RouteList(link, family)
+}
+
+func (m *DefaultNetlinkManager) RouteAdd(route *netlink.Route) error {
+	return netlink.RouteAdd(route)
+}
+
+func (m *DefaultNetlinkManager) LinkByName(name string) (netlink.Link, error) {
+	return netlink.LinkByName(name)
+}
+
 type NetlinkClient struct {
-	logger log.Logger
+	logger  log.Logger
+	manager NetlinkManager
 }
 
 func NewNetlinkClient(logger log.Logger) (*NetlinkClient, error) {
 	return &NetlinkClient{
-		logger: logger,
+		logger:  logger,
+		manager: &DefaultNetlinkManager{},
 	}, nil
 }
 
-func (n *NetlinkClient) GetConnectedRoutes(vrf string) ([]*netlink.Route, error) {
-	var family int
-	if vrf != "" {
-		link, err := netlink.LinkByName(vrf)
-		if err != nil {
-			return nil, err
-		}
-		switch link.Type() {
-		case "device":
-			family = netlink.FAMILY_V4
-		default:
-			family = netlink.FAMILY_ALL
-		}
-	} else {
-		family = netlink.FAMILY_ALL
+func (n *NetlinkClient) GetConnectedRoutes(interfaceName string) ([]*netlink.Route, error) {
+	link, err := n.manager.LinkByName(interfaceName)
+	if err != nil {
+		return nil, err
 	}
-	routes, err := netlink.RouteList(nil, family)
+
+	routes, err := n.manager.RouteList(link, netlink.FAMILY_ALL)
 	if err != nil {
 		return nil, err
 	}
@@ -61,5 +73,5 @@ func (n *NetlinkClient) GetConnectedRoutes(vrf string) ([]*netlink.Route, error)
 }
 
 func (n *NetlinkClient) AddRoute(route *netlink.Route) error {
-	return netlink.RouteAdd(route)
+	return n.manager.RouteAdd(route)
 }

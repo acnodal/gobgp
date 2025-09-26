@@ -790,16 +790,8 @@ func (s *server) EnableZebra(ctx context.Context, r *api.EnableZebraRequest) (*a
 	return &api.EnableZebraResponse{}, s.bgpServer.EnableZebra(ctx, r)
 }
 
-func (s *server) EnableNetlink(ctx context.Context, r *api.EnableNetlinkRequest) (*api.EnableNetlinkResponse, error) {
-	return s.bgpServer.EnableNetlink(ctx, r)
-}
-
-func (s *server) GetRedistribution(ctx context.Context, r *api.GetRedistributionRequest) (*api.GetRedistributionResponse, error) {
-	return s.bgpServer.GetRedistribution(ctx, r)
-}
-
-func (s *server) EnableRedistribution(ctx context.Context, r *api.EnableRedistributionRequest) (*api.EnableRedistributionResponse, error) {
-	return s.bgpServer.EnableRedistribution(ctx, r)
+func (s *server) GetNetlink(ctx context.Context, r *api.GetNetlinkRequest) (*api.GetNetlinkResponse, error) {
+	return s.bgpServer.GetNetlink(ctx, r)
 }
 
 func (s *server) ListVrf(r *api.ListVrfRequest, stream api.GoBgpService_ListVrfServer) error {

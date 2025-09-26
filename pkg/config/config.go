@@ -274,6 +274,8 @@ func updateNeighbors(ctx context.Context, bgpServer *server.BgpServer, updated [
 // obtained by calling ReadConfigFile. If graceful restart behavior is desired,
 // pass true for isGracefulRestart. Otherwise, pass false.
 func InitialConfig(ctx context.Context, bgpServer *server.BgpServer, newConfig *oc.BgpConfigSet, isGracefulRestart bool) (*oc.BgpConfigSet, error) {
+	bgpServer.Log().Debug("loaded full config", log.Fields{"Topic": "config", "Config": newConfig})
+	bgpServer.Log().Debug("loaded netlink config", log.Fields{"Topic": "config", "Netlink": newConfig.Netlink})
 	if err := bgpServer.StartBgp(ctx, &api.StartBgpRequest{
 		Global: oc.NewGlobalFromConfigStruct(&newConfig.Global),
 	}); err != nil {
@@ -299,26 +301,10 @@ func InitialConfig(ctx context.Context, bgpServer *server.BgpServer, newConfig *
 		}
 	}
 
-	if newConfig.Netlink.Import.Enabled {
-		if _, err := bgpServer.EnableRedistribution(ctx, &api.EnableRedistributionRequest{
-			Vrf:        newConfig.Netlink.Import.Vrf,
-			Interfaces: newConfig.Netlink.Import.InterfaceList,
-		}); err != nil {
-			bgpServer.Log().Fatal("failed to set netlink import config",
-				log.Fields{"Topic": "config", "Error": err})
-		}
-	}
-
-	if newConfig.Netlink.Export.Enabled {
-		if _, err := bgpServer.EnableRedistribution(ctx, &api.EnableRedistributionRequest{
-			Vrf:                newConfig.Netlink.Export.Vrf,
-			CommunityName:      newConfig.Netlink.Export.Community,
-			CommunityList:      newConfig.Netlink.Export.CommunityList,
-			LargeCommunityList: newConfig.Netlink.Export.LargeCommunityList,
-		}); err != nil {
-			bgpServer.Log().Fatal("failed to set netlink export config",
-				log.Fields{"Topic": "config", "Error": err})
-		}
+	bgpServer.GetBgpConfig().Netlink = newConfig.Netlink
+	if err := bgpServer.StartNetlink(ctx); err != nil {
+		bgpServer.Log().Fatal("failed to start netlink",
+			log.Fields{"Topic": "config", "Error": err})
 	}
 
 	if len(newConfig.Collector.Config.Url) > 0 {

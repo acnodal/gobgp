@@ -1,0 +1,16 @@
+[global.config]
+  as = 64551
+  router-id = "192.168.151.100"
+
+#[[neighbors]]
+#[neighbors.config]
+#  neighbor-address = "192.168.151.161"
+#  peer-as = "65413"
+
+[netlink]
+  [netlink.import]
+    enabled = true
+    interface-list = ["kubelb0"]
+
+
+    

@@ -16,62 +16,11 @@
 package main
 
 import (
-	"context"
-	"net"
 	"strings"
 	"testing"
 
-	"google.golang.org/grpc"
-
-	"github.com/osrg/gobgp/v4/api"
 	"github.com/stretchr/testify/assert"
 )
-
-type mockServer struct {
-	api.UnimplementedGoBgpServiceServer
-	grpcServer *grpc.Server
-	lis        net.Listener
-	nextResp   interface{}
-	nextErr    error
-	client     api.GoBgpServiceClient
-}
-
-func newMockServer() *mockServer {
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		panic(err)
-	}
-	s := &mockServer{
-		grpcServer: grpc.NewServer(),
-		lis:        lis,
-	}
-	api.RegisterGoBgpServiceServer(s.grpcServer, s)
-	go s.grpcServer.Serve(lis)
-
-	conn, err := grpc.Dial(lis.Addr().String(), grpc.WithInsecure())
-	if err != nil {
-		panic(err)
-	}
-	s.client = api.NewGoBgpServiceClient(conn)
-	return s
-}
-
-func (s *mockServer) stop() {
-	s.grpcServer.Stop()
-}
-
-func (s *mockServer) setNextResponse(resp interface{}, err error) {
-	s.nextResp = resp
-	s.nextErr = err
-}
-
-func (s *mockServer) GetRedistribution(ctx context.Context, in *api.GetRedistributionRequest) (*api.GetRedistributionResponse, error) {
-	return s.nextResp.(*api.GetRedistributionResponse), s.nextErr
-}
-
-func (s *mockServer) EnableRedistribution(ctx context.Context, in *api.EnableRedistributionRequest) (*api.EnableRedistributionResponse, error) {
-	return s.nextResp.(*api.EnableRedistributionResponse), s.nextErr
-}
 
 func Test_ExtractReserved(t *testing.T) {
 	assert := assert.New(t)

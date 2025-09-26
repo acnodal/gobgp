@@ -97,9 +97,8 @@ service GoBgpService {
 
   rpc EnableZebra(EnableZebraRequest) returns (EnableZebraResponse);
 
+  rpc GetNetlink(GetNetlinkRequest) returns (GetNetlinkResponse);
   rpc EnableNetlink(EnableNetlinkRequest) returns (EnableNetlinkResponse);
-  rpc GetRedistribution(GetRedistributionRequest) returns (GetRedistributionResponse);
-  rpc EnableRedistribution(EnableRedistributionRequest) returns(EnableRedistributionResponse);
 
   rpc EnableMrt(EnableMrtRequest) returns (EnableMrtResponse);
   rpc DisableMrt(DisableMrtRequest) returns (DisableMrtResponse);
@@ -111,10 +110,10 @@ service GoBgpService {
   rpc SetLogLevel(SetLogLevelRequest) returns (SetLogLevelResponse);
 }
 
-message GetRedistributionRequest {
+message GetNetlinkRequest {
 }
 
-message GetRedistributionResponse {
+message GetNetlinkResponse {
 	bool import_enabled = 1;
 	bool export_enabled = 2;
 	string vrf = 3;
@@ -582,27 +581,17 @@ message EnableZebraRequest {
 
 message EnableZebraResponse {}
 
-message EnableRedistributionRequest {
-	string vrf = 1;
-	bool export = 2;
-	string community_name = 3;
-	repeated string community_list = 4;
-	repeated string large_community_list = 5;
-	repeated string interfaces = 6;
-}
-
-message EnableRedistributionResponse {}
 
 
 message EnableNetlinkRequest {
-       bool enabled = 1;
-       string vrf = 2;
-       repeated string interfaces = 3;
+	string vrf = 1;
+	repeated string interfaces = 2;
+	string community = 3;
+	repeated string community_list = 4;
+	repeated string large_community_list = 5;
 }
  
 message EnableNetlinkResponse {}
-
-
 
 
 message EnableMrtRequest {

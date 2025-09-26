@@ -30,10 +30,10 @@ type netlinkClient struct {
 	client *netlink.NetlinkClient
 	server *BgpServer
 	dead   chan struct{}
-	vrf    string
 }
 
-func newNetlinkClient(s *BgpServer, vrf string) (*netlinkClient, error) {
+func newNetlinkClient(s *BgpServer) (*netlinkClient, error) {
+	s.logger.Debug("creating new netlink client", log.Fields{"Topic": "netlink"})
 	n, err := netlink.NewNetlinkClient(s.logger)
 	if err != nil {
 		return nil, err
@@ -42,13 +42,13 @@ func newNetlinkClient(s *BgpServer, vrf string) (*netlinkClient, error) {
 		client: n,
 		server: s,
 		dead:   make(chan struct{}),
-		vrf:    vrf,
 	}
 	go w.loop()
 	return w, nil
 }
 
 func (n *netlinkClient) loop() {
+	n.server.logger.Debug("starting netlink client loop", log.Fields{"Topic": "netlink"})
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
@@ -57,22 +57,35 @@ func (n *netlinkClient) loop() {
 		case <-n.dead:
 			return
 		case <-ticker.C:
-			routes, err := n.client.GetConnectedRoutes(n.vrf)
-			if err != nil {
-				n.server.logger.Error("failed to get connected routes",
-					log.Fields{
-						"Topic": "netlink",
-						"Error": err,
-					})
+			if !n.server.bgpConfig.Netlink.Import.Enabled {
 				continue
 			}
-			pathList := n.netlinkRoutesToPaths(routes)
-			if err := n.server.addPathList(n.vrf, pathList); err != nil {
-				n.server.logger.Error("failed to add path from netlink",
-					log.Fields{
-						"Topic": "netlink",
-						"Error": err,
-					})
+			vrf := n.server.bgpConfig.Netlink.Import.Vrf
+			interfaces := n.server.bgpConfig.Netlink.Import.InterfaceList
+			pathList := make([]*table.Path, 0)
+
+			for _, iface := range interfaces {
+				routes, err := n.client.GetConnectedRoutes(iface)
+				if err != nil {
+					n.server.logger.Error("failed to get connected routes",
+						log.Fields{
+							"Topic":     "netlink",
+							"Interface": iface,
+							"Error":     err,
+						})
+					continue
+				}
+				pathList = append(pathList, n.netlinkRoutesToPaths(routes)...)
+			}
+
+			if len(pathList) > 0 {
+				if err := n.server.addPathList(vrf, pathList); err != nil {
+					n.server.logger.Error("failed to add path from netlink",
+						log.Fields{
+							"Topic": "netlink",
+							"Error": err,
+						})
+				}
 			}
 		}
 	}
@@ -82,10 +95,6 @@ func (n *netlinkClient) netlinkRoutesToPaths(routes []*go_netlink.Route) []*tabl
 	pathList := make([]*table.Path, 0, len(routes))
 	for _, route := range routes {
 		if route.Dst == nil {
-			continue
-		}
-
-		if !n.shouldRedistribute(route) {
 			continue
 		}
 
@@ -125,28 +134,6 @@ func (n *netlinkClient) netlinkRoutesToPaths(routes []*go_netlink.Route) []*tabl
 	return pathList
 }
 
-func (n *netlinkClient) shouldRedistribute(route *go_netlink.Route) bool {
-	if !n.server.bgpConfig.Netlink.Config.Enabled {
-		return false
-	}
-	interfaces := n.server.bgpConfig.Netlink.Config.InterfaceList
-	if len(interfaces) == 0 {
-		return true
-	}
-
-	link, err := go_netlink.LinkByIndex(route.LinkIndex)
-	if err != nil {
-		return false
-	}
-
-	for _, iface := range interfaces {
-		if iface == link.Attrs().Name {
-			return true
-		}
-	}
-	return false
-}
-
 func (n *netlinkClient) exportRoute(path *table.Path) error {
 	if path.IsWithdraw {
 		// TODO: handle withdraw
@@ -177,7 +164,7 @@ func (n *netlinkClient) exportRoute(path *table.Path) error {
 }
 
 func (n *netlinkClient) shouldExport(path *table.Path) bool {
-	if !n.server.bgpConfig.Netlink.Config.Enabled {
+	if !n.server.bgpConfig.Netlink.Export.Enabled {
 		return false
 	}
 	// TODO: add community support
