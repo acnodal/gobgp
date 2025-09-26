@@ -49,7 +49,7 @@ func newNetlinkClient(s *BgpServer) (*netlinkClient, error) {
 
 func (n *netlinkClient) loop() {
 	n.server.logger.Debug("starting netlink client loop", log.Fields{"Topic": "netlink"})
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	for {

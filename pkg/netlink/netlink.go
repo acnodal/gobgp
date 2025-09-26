@@ -16,6 +16,8 @@
 package netlink
 
 import (
+	"fmt"
+
 	"github.com/osrg/gobgp/v4/pkg/log"
 	"github.com/vishvananda/netlink"
 )
@@ -65,6 +67,7 @@ func (n *NetlinkClient) GetConnectedRoutes(interfaceName string) ([]*netlink.Rou
 
 	connected := make([]*netlink.Route, 0)
 	for i, route := range routes {
+		n.logger.Debug("Dumping route structure", log.Fields{"Topic": "netlink", "Route": fmt.Sprintf("%+v, Scope: %v", route, route.Scope)})
 		if route.Protocol == 2 { // kernel
 			connected = append(connected, &routes[i])
 		}

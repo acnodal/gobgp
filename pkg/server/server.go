@@ -2019,7 +2019,15 @@ func (s *BgpServer) DeleteBmp(ctx context.Context, r *api.DeleteBmpRequest) erro
 }
 
 func (s *BgpServer) GetNetlink(ctx context.Context, in *api.GetNetlinkRequest) (*api.GetNetlinkResponse, error) {
-	return nil, nil
+	return &api.GetNetlinkResponse{
+		ImportEnabled:      s.bgpConfig.Netlink.Import.Enabled,
+		ExportEnabled:      s.bgpConfig.Netlink.Export.Enabled,
+		Vrf:                s.bgpConfig.Netlink.Import.Vrf,
+		Interfaces:         s.bgpConfig.Netlink.Import.InterfaceList,
+		CommunityName:      s.bgpConfig.Netlink.Export.Community,
+		CommunityList:      s.bgpConfig.Netlink.Export.CommunityList,
+		LargeCommunityList: s.bgpConfig.Netlink.Export.LargeCommunityList,
+	}, nil
 }
 
 func (s *BgpServer) ListBmp(ctx context.Context, req *api.ListBmpRequest, fn func(*api.ListBmpResponse_BmpStation)) error {
