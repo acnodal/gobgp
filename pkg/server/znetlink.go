@@ -43,8 +43,42 @@ func newNetlinkClient(s *BgpServer) (*netlinkClient, error) {
 		server: s,
 		dead:   make(chan struct{}),
 	}
+	w.runImport()
 	go w.loop()
 	return w, nil
+}
+
+func (n *netlinkClient) runImport() {
+	if !n.server.bgpConfig.Netlink.Import.Enabled {
+		return
+	}
+	vrf := n.server.bgpConfig.Netlink.Import.Vrf
+	interfaces := n.server.bgpConfig.Netlink.Import.InterfaceList
+	pathList := make([]*table.Path, 0)
+
+	for _, iface := range interfaces {
+		routes, err := n.client.GetConnectedRoutes(iface)
+		if err != nil {
+			n.server.logger.Error("failed to get connected routes",
+				log.Fields{
+					"Topic":     "netlink",
+					"Interface": iface,
+					"Error":     err,
+				})
+			continue
+		}
+		pathList = append(pathList, n.netlinkRoutesToPaths(routes)...)
+	}
+
+	if len(pathList) > 0 {
+		if err := n.server.addPathList(vrf, pathList); err != nil {
+			n.server.logger.Error("failed to add path from netlink",
+				log.Fields{
+					"Topic": "netlink",
+					"Error": err,
+				})
+		}
+	}
 }
 
 func (n *netlinkClient) loop() {
@@ -57,36 +91,7 @@ func (n *netlinkClient) loop() {
 		case <-n.dead:
 			return
 		case <-ticker.C:
-			if !n.server.bgpConfig.Netlink.Import.Enabled {
-				continue
-			}
-			vrf := n.server.bgpConfig.Netlink.Import.Vrf
-			interfaces := n.server.bgpConfig.Netlink.Import.InterfaceList
-			pathList := make([]*table.Path, 0)
-
-			for _, iface := range interfaces {
-				routes, err := n.client.GetConnectedRoutes(iface)
-				if err != nil {
-					n.server.logger.Error("failed to get connected routes",
-						log.Fields{
-							"Topic":     "netlink",
-							"Interface": iface,
-							"Error":     err,
-						})
-					continue
-				}
-				pathList = append(pathList, n.netlinkRoutesToPaths(routes)...)
-			}
-
-			if len(pathList) > 0 {
-				if err := n.server.addPathList(vrf, pathList); err != nil {
-					n.server.logger.Error("failed to add path from netlink",
-						log.Fields{
-							"Topic": "netlink",
-							"Error": err,
-						})
-				}
-			}
+			n.runImport()
 		}
 	}
 }
