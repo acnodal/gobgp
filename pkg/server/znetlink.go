@@ -23,13 +23,15 @@ import (
 	"github.com/osrg/gobgp/v4/pkg/log"
 	"github.com/osrg/gobgp/v4/pkg/netlink"
 	"github.com/osrg/gobgp/v4/pkg/packet/bgp"
+	custom_net "github.com/osrg/gobgp/v4/pkg/netutils"
 	go_netlink "github.com/vishvananda/netlink"
 )
 
 type netlinkClient struct {
-	client *netlink.NetlinkClient
-	server *BgpServer
-	dead   chan struct{}
+	client          *netlink.NetlinkClient
+	server          *BgpServer
+	dead            chan struct{}
+	advertisedPaths map[string]*table.Path
 }
 
 func newNetlinkClient(s *BgpServer) (*netlinkClient, error) {
@@ -39,9 +41,10 @@ func newNetlinkClient(s *BgpServer) (*netlinkClient, error) {
 		return nil, err
 	}
 	w := &netlinkClient{
-		client: n,
-		server: s,
-		dead:   make(chan struct{}),
+		client:          n,
+		server:          s,
+		dead:            make(chan struct{}),
+		advertisedPaths: make(map[string]*table.Path),
 	}
 	w.runImport()
 	go w.loop()
@@ -54,10 +57,12 @@ func (n *netlinkClient) runImport() {
 	}
 	vrf := n.server.bgpConfig.Netlink.Import.Vrf
 	interfaces := n.server.bgpConfig.Netlink.Import.InterfaceList
-	pathList := make([]*table.Path, 0)
+	
+	currentPaths := make(map[string]*table.Path)
+	newPathList := make([]*table.Path, 0)
 
 	for _, iface := range interfaces {
-		routes, err := n.client.GetConnectedRoutes(iface)
+		routes, err := custom_net.GetGlobalUnicastRoutes(iface, n.server.logger)
 		if err != nil {
 			n.server.logger.Error("failed to get connected routes",
 				log.Fields{
@@ -67,12 +72,49 @@ func (n *netlinkClient) runImport() {
 				})
 			continue
 		}
-		pathList = append(pathList, n.netlinkRoutesToPaths(routes)...)
+		for _, path := range n.ipNetsToPaths(routes) {
+			key := path.GetNlri().String()
+			currentPaths[key] = path
+		}
 	}
 
-	if len(pathList) > 0 {
-		if err := n.server.addPathList(vrf, pathList); err != nil {
+	// Find new paths to add
+	for key, path := range currentPaths {
+		if _, ok := n.advertisedPaths[key]; !ok {
+			newPathList = append(newPathList, path)
+		}
+	}
+
+	// Find old paths to withdraw
+	withdrawnPathList := make([]*table.Path, 0)
+	for key, path := range n.advertisedPaths {
+		if _, ok := currentPaths[key]; !ok {
+			n.server.logger.Debug("Withdrawing route from netlink",
+				log.Fields{
+					"Topic": "netlink",
+					"Route": path.GetNlri().String(),
+				})
+			withdrawnPathList = append(withdrawnPathList, path.Clone(true))
+		}
+	}
+
+	// Update advertised paths
+	n.advertisedPaths = currentPaths
+
+	// Propagate changes
+	if len(newPathList) > 0 {
+		if err := n.server.addPathList(vrf, newPathList); err != nil {
 			n.server.logger.Error("failed to add path from netlink",
+				log.Fields{
+					"Topic": "netlink",
+					"Error": err,
+				})
+		}
+	}
+
+	if len(withdrawnPathList) > 0 {
+		if err := n.server.addPathList(vrf, withdrawnPathList); err != nil {
+			n.server.logger.Error("failed to withdraw path from netlink",
 				log.Fields{
 					"Topic": "netlink",
 					"Error": err,
@@ -96,14 +138,10 @@ func (n *netlinkClient) loop() {
 	}
 }
 
-func (n *netlinkClient) netlinkRoutesToPaths(routes []*go_netlink.Route) []*table.Path {
+func (n *netlinkClient) ipNetsToPaths(routes []*custom_net.ConnectedRoute) []*table.Path {
 	pathList := make([]*table.Path, 0, len(routes))
 	for _, route := range routes {
-		if route.Dst == nil {
-			continue
-		}
-
-		nlri, err := table.NewNlriFromAPI(route.Dst)
+		nlri, err := table.NewNlriFromAPI(route.Prefix)
 		if err != nil {
 			n.server.logger.Warn("failed to create nlri from netlink route",
 				log.Fields{
@@ -118,17 +156,11 @@ func (n *netlinkClient) netlinkRoutesToPaths(routes []*go_netlink.Route) []*tabl
 		origin := bgp.NewPathAttributeOrigin(bgp.BGP_ORIGIN_ATTR_TYPE_IGP)
 		pattr = append(pattr, origin)
 
-		if route.Gw != nil {
-			nexthop := bgp.NewPathAttributeNextHop(route.Gw.String())
-			pattr = append(pattr, nexthop)
-		} else {
-			if len(route.Dst.IP) > 0 {
-				nexthop := bgp.NewPathAttributeNextHop(route.Dst.IP.String())
-				pattr = append(pattr, nexthop)
-			}
-		}
+		nexthop := bgp.NewPathAttributeNextHop(route.NextHop.String())
+		pattr = append(pattr, nexthop)
+
 		family := bgp.RF_IPv4_UC
-		if route.Dst.IP.To4() == nil {
+		if route.Prefix.IP.To4() == nil {
 			family = bgp.RF_IPv6_UC
 		}
 

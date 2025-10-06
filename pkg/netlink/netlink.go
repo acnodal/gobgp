@@ -16,8 +16,6 @@
 package netlink
 
 import (
-	"fmt"
-
 	"github.com/osrg/gobgp/v4/pkg/log"
 	"github.com/vishvananda/netlink"
 )
@@ -52,27 +50,6 @@ func NewNetlinkClient(logger log.Logger) (*NetlinkClient, error) {
 		logger:  logger,
 		manager: &DefaultNetlinkManager{},
 	}, nil
-}
-
-func (n *NetlinkClient) GetConnectedRoutes(interfaceName string) ([]*netlink.Route, error) {
-	link, err := n.manager.LinkByName(interfaceName)
-	if err != nil {
-		return nil, err
-	}
-
-	routes, err := n.manager.RouteList(link, netlink.FAMILY_ALL)
-	if err != nil {
-		return nil, err
-	}
-
-	connected := make([]*netlink.Route, 0)
-	for i, route := range routes {
-		n.logger.Debug("Dumping route structure", log.Fields{"Topic": "netlink", "Route": fmt.Sprintf("%+v, Scope: %v, Protocol: %v", route, route.Scope, route.Protocol)})
-		if route.Protocol == 2 { // kernel
-			connected = append(connected, &routes[i])
-		}
-	}
-	return connected, nil
 }
 
 func (n *NetlinkClient) AddRoute(route *netlink.Route) error {
