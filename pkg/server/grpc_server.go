@@ -226,6 +226,8 @@ func toPathAPI(binNlri []byte, binPattrs [][]byte, anyNlri *api.NLRI, anyPattrs 
 		SendMaxFiltered: path.SendMaxFiltered,
 		Filtered:        path.Filtered,
 		Validation:      path.Validation,
+		IsNetlink:       path.IsNetlink,
+		NetlinkIfName:   path.NetlinkIfName,
 	}
 	if path.PeerID.IsValid() {
 		p.SourceId = path.PeerID.String()
@@ -263,7 +265,11 @@ func toPathApi(path *apiutil.Path, onlyBinary, nlriBinary, attributeBinary bool)
 			}
 		}
 	}
-	return toPathAPI(binNlri, binPattrs, anyNlri, anyPattrs, path)
+	p := toPathAPI(binNlri, binPattrs, anyNlri, anyPattrs, path)
+	if path.IsNetlink {
+		p.NeighborIp = path.PeerID.String()
+	}
+	return p
 }
 
 func getValidation(v map[*table.Path]*table.Validation, p *table.Path) *table.Validation {
@@ -300,7 +306,7 @@ func (s *server) listPath(ctx context.Context, r *api.ListPathRequest, fn func(*
 		}
 	}
 
-	err := s.bgpServer.ListPath(req, func(prefix bgp.AddrPrefixInterface, paths []*apiutil.Path) {
+	err := s.bgpServer.ListPath(req, func(prefix bgp.AddrPrefixInterface, paths []*table.Path, v map[*table.Path]*table.Validation, filtered map[table.PathLocalKey]table.FilteredType) {
 		select {
 		case <-ctx.Done():
 			return
@@ -310,7 +316,15 @@ func (s *server) listPath(ctx context.Context, r *api.ListPathRequest, fn func(*
 				Paths:  make([]*api.Path, len(paths)),
 			}
 			for i, path := range paths {
-				d.Paths[i] = toPathApi(path, r.EnableOnlyBinary, r.EnableNlriBinary, r.EnableAttributeBinary)
+				p := toPathApiUtil(path)
+				p.Validation = newValidationFromTableStruct(getValidation(v, path))
+				if filtered != nil {
+					if f, ok := filtered[path.GetLocalKey()]; ok {
+						p.Filtered = f&table.PolicyFiltered > 0
+						p.SendMaxFiltered = f&table.SendMaxFiltered > 0
+					}
+				}
+				d.Paths[i] = toPathApi(p, r.EnableOnlyBinary, r.EnableNlriBinary, r.EnableAttributeBinary)
 			}
 			fn(&d)
 		}

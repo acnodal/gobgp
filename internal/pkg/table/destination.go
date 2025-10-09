@@ -89,6 +89,12 @@ type PeerInfo struct {
 	RouteReflectorClient    bool
 	MultihopTtl             uint8
 	Confederation           bool
+	NetlinkIfName           string
+	IsNetlink               bool
+}
+
+func (p *PeerInfo) GetNeighborInterface() string {
+	return p.NetlinkIfName
 }
 
 func (lhs *PeerInfo) Equal(rhs *PeerInfo) bool {
@@ -134,6 +140,14 @@ func NewPeerInfo(g *oc.Global, p *oc.Neighbor, AS, localAS uint32, ID, localID n
 		RouteReflectorClient:    p.RouteReflector.Config.RouteReflectorClient,
 		MultihopTtl:             p.EbgpMultihop.Config.MultihopTtl,
 		Confederation:           p.IsConfederationMember(g),
+	}
+}
+
+func NewNetlinkPeerInfo(iface string) *PeerInfo {
+	return &PeerInfo{
+		ID:            netip.MustParseAddr("0.0.0.1"), // Magic value
+		Address:       netip.MustParseAddr("0.0.0.0"),
+		NetlinkIfName: iface,
 	}
 }
 

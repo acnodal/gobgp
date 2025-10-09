@@ -89,22 +89,23 @@ type LookupPrefix struct {
 // used by server.WatchEventMessages API
 type Path struct {
 	Family             bgp.Family
-	Nlri               bgp.AddrPrefixInterface      `json:"nlri"`
-	Age                int64                        `json:"age"`
-	Best               bool                         `json:"best"`
-	Attrs              []bgp.PathAttributeInterface `json:"attrs"`
-	Stale              bool                         `json:"stale"`
-	Withdrawal         bool                         `json:"withdrawal,omitempty"`
-	PeerASN            uint32                       `json:"peer-asn,omitempty"`
-	PeerID             netip.Addr                   `json:"peer-id,omitzero"`
-	PeerAddress        netip.Addr                   `json:"peer-address,omitzero"`
-	IsFromExternal     bool                         `json:"is-from-external,omitempty"`
-	NoImplicitWithdraw bool                         `json:"no-implicit-withdraw,omitempty"`
-	IsNexthopInvalid   bool                         `json:"is-nexthop-invalid,omitempty"`
-	// the following fields are used only repoted by GetList() API
-	SendMaxFiltered bool            `json:"send-max-filtered,omitempty"` // true if the path has been filtered out due to max path count reached
-	Filtered        bool            `json:"filtered,omitempty"`
-	Validation      *api.Validation `json:"validation,omitempty"`
+	Nlri               bgp.AddrPrefixInterface
+	Attrs              []bgp.PathAttributeInterface
+	Age                int64
+	Best               bool
+	Stale              bool
+	Withdrawal         bool
+	PeerASN            uint32
+	PeerID             netip.Addr
+	PeerAddress        netip.Addr
+	IsFromExternal     bool
+	NoImplicitWithdraw bool
+	IsNexthopInvalid   bool
+	SendMaxFiltered    bool
+	Filtered           bool
+	Validation         *api.Validation
+	IsNetlink          bool
+	NetlinkIfName      string
 }
 
 type PeerConf struct {

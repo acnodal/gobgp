@@ -2944,7 +2944,7 @@ func (s *BgpServer) getAdjRib(addr string, family bgp.Family, in bool, enableFil
 	return
 }
 
-func (s *BgpServer) ListPath(r apiutil.ListPathRequest, fn func(prefix bgp.AddrPrefixInterface, paths []*apiutil.Path)) error {
+func (s *BgpServer) ListPath(r apiutil.ListPathRequest, fn func(prefix bgp.AddrPrefixInterface, paths []*table.Path, v map[*table.Path]*table.Validation, filtered map[table.PathLocalKey]table.FilteredType)) error {
 	in := false
 	family := r.Family
 
@@ -2975,35 +2975,7 @@ func (s *BgpServer) ListPath(r apiutil.ListPathRequest, fn func(prefix bgp.AddrP
 		for _, dst := range tbl.GetDestinations() {
 			prefix := dst.GetNlri()
 			knownPathList := dst.GetAllKnownPathList()
-			paths := make([]*apiutil.Path, len(knownPathList))
-
-			for i, path := range knownPathList {
-				p := toPathApiUtil(path)
-				if validation := getValidation(v, path); validation != nil {
-					p.Validation = newValidationFromTableStruct(validation)
-				}
-				if !table.SelectionOptions.DisableBestPathSelection {
-					if i == 0 {
-						switch r.TableType {
-						case api.TableType_TABLE_TYPE_LOCAL, api.TableType_TABLE_TYPE_GLOBAL:
-							p.Best = true
-						}
-					} else if s.bgpConfig.Global.UseMultiplePaths.Config.Enabled && path.Equal(knownPathList[i-1]) {
-						p.Best = true
-					}
-				}
-				if r.EnableFiltered && filtered[path.GetLocalKey()]&table.PolicyFiltered > 0 {
-					p.Filtered = true
-				}
-				// we always want to know that some paths are filtered out
-				// by send-max attribute
-				if filtered[path.GetLocalKey()]&table.SendMaxFiltered > 0 {
-					p.SendMaxFiltered = true
-				}
-				paths[i] = p
-			}
-
-			fn(prefix, paths)
+			fn(prefix, knownPathList, v, filtered)
 		}
 		return nil
 	}()
@@ -4478,6 +4450,8 @@ func toPathApiUtil(path *table.Path) *apiutil.Path {
 		p.PeerASN = s.AS
 		p.PeerID = s.ID
 		p.PeerAddress = s.Address
+		p.IsNetlink = s.IsNetlink
+		p.NetlinkIfName = s.NetlinkIfName
 	}
 	return p
 }

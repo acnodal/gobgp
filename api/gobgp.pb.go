@@ -6750,6 +6750,8 @@ type Path struct {
 	NlriBinary         []byte                 `protobuf:"bytes,20,opt,name=nlri_binary,json=nlriBinary,proto3" json:"nlri_binary,omitempty"`
 	PattrsBinary       [][]byte               `protobuf:"bytes,21,rep,name=pattrs_binary,json=pattrsBinary,proto3" json:"pattrs_binary,omitempty"`
 	SendMaxFiltered    bool                   `protobuf:"varint,22,opt,name=send_max_filtered,json=sendMaxFiltered,proto3" json:"send_max_filtered,omitempty"`
+	IsNetlink          bool                   `protobuf:"varint,23,opt,name=is_netlink,json=isNetlink,proto3" json:"is_netlink,omitempty"`
+	NetlinkIfName      string                 `protobuf:"bytes,24,opt,name=netlink_if_name,json=netlinkIfName,proto3" json:"netlink_if_name,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -6929,6 +6931,20 @@ func (x *Path) GetSendMaxFiltered() bool {
 		return x.SendMaxFiltered
 	}
 	return false
+}
+
+func (x *Path) GetIsNetlink() bool {
+	if x != nil {
+		return x.IsNetlink
+	}
+	return false
+}
+
+func (x *Path) GetNetlinkIfName() string {
+	if x != nil {
+		return x.NetlinkIfName
+	}
+	return ""
 }
 
 type Destination struct {
@@ -13190,7 +13206,7 @@ const file_api_gobgp_proto_rawDesc = "" +
 	"\vREASON_NONE\x10\x01\x12\x0e\n" +
 	"\n" +
 	"REASON_ASN\x10\x02\x12\x11\n" +
-	"\rREASON_LENGTH\x10\x03\"\xf0\x05\n" +
+	"\rREASON_LENGTH\x10\x03\"\xb7\x06\n" +
 	"\x04Path\x12\x1d\n" +
 	"\x04nlri\x18\x01 \x01(\v2\t.api.NLRIR\x04nlri\x12&\n" +
 	"\x06pattrs\x18\x02 \x03(\v2\x0e.api.AttributeR\x06pattrs\x12,\n" +
@@ -13221,7 +13237,10 @@ const file_api_gobgp_proto_rawDesc = "" +
 	"\vnlri_binary\x18\x14 \x01(\fR\n" +
 	"nlriBinary\x12#\n" +
 	"\rpattrs_binary\x18\x15 \x03(\fR\fpattrsBinary\x12*\n" +
-	"\x11send_max_filtered\x18\x16 \x01(\bR\x0fsendMaxFiltered\"F\n" +
+	"\x11send_max_filtered\x18\x16 \x01(\bR\x0fsendMaxFiltered\x12\x1d\n" +
+	"\n" +
+	"is_netlink\x18\x17 \x01(\bR\tisNetlink\x12&\n" +
+	"\x0fnetlink_if_name\x18\x18 \x01(\tR\rnetlinkIfName\"F\n" +
 	"\vDestination\x12\x16\n" +
 	"\x06prefix\x18\x01 \x01(\tR\x06prefix\x12\x1f\n" +
 	"\x05paths\x18\x02 \x03(\v2\t.api.PathR\x05paths\"\xa3\x04\n" +

@@ -72,7 +72,7 @@ func (n *netlinkClient) runImport() {
 				})
 			continue
 		}
-		for _, path := range n.ipNetsToPaths(routes) {
+		for _, path := range n.ipNetsToPaths(routes, iface) {
 			key := path.GetNlri().String()
 			currentPaths[key] = path
 		}
@@ -138,7 +138,7 @@ func (n *netlinkClient) loop() {
 	}
 }
 
-func (n *netlinkClient) ipNetsToPaths(routes []*custom_net.ConnectedRoute) []*table.Path {
+func (n *netlinkClient) ipNetsToPaths(routes []*custom_net.ConnectedRoute, iface string) []*table.Path {
 	pathList := make([]*table.Path, 0, len(routes))
 	for _, route := range routes {
 		nlri, err := table.NewNlriFromAPI(route.Prefix)
@@ -156,7 +156,7 @@ func (n *netlinkClient) ipNetsToPaths(routes []*custom_net.ConnectedRoute) []*ta
 		origin := bgp.NewPathAttributeOrigin(bgp.BGP_ORIGIN_ATTR_TYPE_IGP)
 		pattr = append(pattr, origin)
 
-		nexthop := bgp.NewPathAttributeNextHop(route.NextHop.String())
+		nexthop := bgp.NewPathAttributeNextHop("0.0.0.0")
 		pattr = append(pattr, nexthop)
 
 		family := bgp.RF_IPv4_UC
@@ -164,7 +164,10 @@ func (n *netlinkClient) ipNetsToPaths(routes []*custom_net.ConnectedRoute) []*ta
 			family = bgp.RF_IPv6_UC
 		}
 
-		path := table.NewPath(family, nil, nlri, false, pattr, time.Now(), false)
+		source := table.NewNetlinkPeerInfo(iface)
+		source.IsNetlink = true
+
+		path := table.NewPath(family, source, nlri, false, pattr, time.Now(), false)
 		path.SetIsFromExternal(true)
 		pathList = append(pathList, path)
 	}
