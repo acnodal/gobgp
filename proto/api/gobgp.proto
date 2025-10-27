@@ -1322,6 +1322,8 @@ message Vrf {
   repeated RouteTarget import_rt = 3;
   repeated RouteTarget export_rt = 4;
   uint32 id = 5;
+  bool netlink_import_enabled = 6;
+  repeated string netlink_import_interfaces = 7;
 }
 
 message DefaultRouteDistance {

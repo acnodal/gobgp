@@ -2639,12 +2639,26 @@ func (s *BgpServer) ListVrf(ctx context.Context, r *api.ListVrfRequest, fn func(
 		d, _ := apiutil.MarshalRD(v.Rd)
 		irt, _ := apiutil.MarshalRTs(v.ImportRt.ToSlice())
 		ert, _ := apiutil.MarshalRTs(v.ExportRt)
+
+		// Find netlink import config for this VRF
+		netlinkImportEnabled := false
+		var netlinkImportInterfaces []string
+		for _, vrfConfig := range s.bgpConfig.Vrfs {
+			if vrfConfig.Config.Name == v.Name && vrfConfig.NetlinkImport.Enabled {
+				netlinkImportEnabled = true
+				netlinkImportInterfaces = vrfConfig.NetlinkImport.InterfaceList
+				break
+			}
+		}
+
 		return &api.Vrf{
-			Name:     v.Name,
-			Rd:       d,
-			Id:       v.Id,
-			ImportRt: irt,
-			ExportRt: ert,
+			Name:                    v.Name,
+			Rd:                      d,
+			Id:                      v.Id,
+			ImportRt:                irt,
+			ExportRt:                ert,
+			NetlinkImportEnabled:    netlinkImportEnabled,
+			NetlinkImportInterfaces: netlinkImportInterfaces,
 		}
 	}
 	var l []*api.Vrf

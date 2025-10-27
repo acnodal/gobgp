@@ -11780,14 +11780,16 @@ func (x *Roa) GetConf() *RPKIConf {
 }
 
 type Vrf struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Rd            *RouteDistinguisher    `protobuf:"bytes,2,opt,name=rd,proto3" json:"rd,omitempty"`
-	ImportRt      []*RouteTarget         `protobuf:"bytes,3,rep,name=import_rt,json=importRt,proto3" json:"import_rt,omitempty"`
-	ExportRt      []*RouteTarget         `protobuf:"bytes,4,rep,name=export_rt,json=exportRt,proto3" json:"export_rt,omitempty"`
-	Id            uint32                 `protobuf:"varint,5,opt,name=id,proto3" json:"id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	Name                    string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Rd                      *RouteDistinguisher    `protobuf:"bytes,2,opt,name=rd,proto3" json:"rd,omitempty"`
+	ImportRt                []*RouteTarget         `protobuf:"bytes,3,rep,name=import_rt,json=importRt,proto3" json:"import_rt,omitempty"`
+	ExportRt                []*RouteTarget         `protobuf:"bytes,4,rep,name=export_rt,json=exportRt,proto3" json:"export_rt,omitempty"`
+	Id                      uint32                 `protobuf:"varint,5,opt,name=id,proto3" json:"id,omitempty"`
+	NetlinkImportEnabled    bool                   `protobuf:"varint,6,opt,name=netlink_import_enabled,json=netlinkImportEnabled,proto3" json:"netlink_import_enabled,omitempty"`
+	NetlinkImportInterfaces []string               `protobuf:"bytes,7,rep,name=netlink_import_interfaces,json=netlinkImportInterfaces,proto3" json:"netlink_import_interfaces,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *Vrf) Reset() {
@@ -11853,6 +11855,20 @@ func (x *Vrf) GetId() uint32 {
 		return x.Id
 	}
 	return 0
+}
+
+func (x *Vrf) GetNetlinkImportEnabled() bool {
+	if x != nil {
+		return x.NetlinkImportEnabled
+	}
+	return false
+}
+
+func (x *Vrf) GetNetlinkImportInterfaces() []string {
+	if x != nil {
+		return x.NetlinkImportInterfaces
+	}
+	return nil
 }
 
 type DefaultRouteDistance struct {
@@ -13699,13 +13715,15 @@ const file_api_gobgp_proto_rawDesc = "" +
 	"\tprefixlen\x18\x02 \x01(\rR\tprefixlen\x12\x16\n" +
 	"\x06maxlen\x18\x03 \x01(\rR\x06maxlen\x12\x16\n" +
 	"\x06prefix\x18\x04 \x01(\tR\x06prefix\x12!\n" +
-	"\x04conf\x18\x05 \x01(\v2\r.api.RPKIConfR\x04conf\"\xb0\x01\n" +
+	"\x04conf\x18\x05 \x01(\v2\r.api.RPKIConfR\x04conf\"\xa2\x02\n" +
 	"\x03Vrf\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
 	"\x02rd\x18\x02 \x01(\v2\x17.api.RouteDistinguisherR\x02rd\x12-\n" +
 	"\timport_rt\x18\x03 \x03(\v2\x10.api.RouteTargetR\bimportRt\x12-\n" +
 	"\texport_rt\x18\x04 \x03(\v2\x10.api.RouteTargetR\bexportRt\x12\x0e\n" +
-	"\x02id\x18\x05 \x01(\rR\x02id\"\x86\x01\n" +
+	"\x02id\x18\x05 \x01(\rR\x02id\x124\n" +
+	"\x16netlink_import_enabled\x18\x06 \x01(\bR\x14netlinkImportEnabled\x12:\n" +
+	"\x19netlink_import_interfaces\x18\a \x03(\tR\x17netlinkImportInterfaces\"\x86\x01\n" +
 	"\x14DefaultRouteDistance\x126\n" +
 	"\x17external_route_distance\x18\x01 \x01(\rR\x15externalRouteDistance\x126\n" +
 	"\x17internal_route_distance\x18\x02 \x01(\rR\x15internalRouteDistance\"\xce\x04\n" +
