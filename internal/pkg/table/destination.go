@@ -20,10 +20,12 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/netip"
 	"slices"
 	"sort"
 
+	"github.com/osrg/gobgp/v4/internal/pkg/netutils"
 	"github.com/osrg/gobgp/v4/pkg/config/oc"
 	"github.com/osrg/gobgp/v4/pkg/log"
 	"github.com/osrg/gobgp/v4/pkg/packet/bgp"
@@ -85,6 +87,9 @@ type PeerInfo struct {
 	LocalID                 netip.Addr
 	Address                 netip.Addr
 	LocalAddress            netip.Addr
+	IPv4Nexthop             net.IP
+	IPv6Nexthop             net.IP
+	IPv6LinkLocalNexthop    net.IP
 	RouteReflectorClusterID netip.Addr
 	RouteReflectorClient    bool
 	MultihopTtl             uint8
@@ -143,12 +148,30 @@ func NewPeerInfo(g *oc.Global, p *oc.Neighbor, AS, localAS uint32, ID, localID n
 	}
 }
 
-func NewNetlinkPeerInfo(iface string) *PeerInfo {
-	return &PeerInfo{
+func NewNetlinkPeerInfo(iface string, logger log.Logger) *PeerInfo {
+	peerInfo := &PeerInfo{
 		ID:            netip.MustParseAddr("0.0.0.1"), // Magic value
 		Address:       netip.MustParseAddr("0.0.0.0"),
 		NetlinkIfName: iface,
+		IsNetlink:     true,
 	}
+
+	// Populate IPv4 nexthop from interface
+	if ipv4, err := netutils.GetIPv4Nexthop(iface, logger); err == nil {
+		peerInfo.IPv4Nexthop = ipv4
+	}
+
+	// Populate IPv6 nexthops from interface
+	if ipv6nexthops, err := netutils.GetIPv6Nexthops(iface, logger); err == nil {
+		if ipv6nexthops.Global != nil {
+			peerInfo.IPv6Nexthop = ipv6nexthops.Global
+		}
+		if ipv6nexthops.LinkLocal != nil {
+			peerInfo.IPv6LinkLocalNexthop = ipv6nexthops.LinkLocal
+		}
+	}
+
+	return peerInfo
 }
 
 type Destination struct {

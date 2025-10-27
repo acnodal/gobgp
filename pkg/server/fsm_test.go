@@ -321,10 +321,10 @@ func TestBadBGPIdentifier(t *testing.T) {
 }
 
 func makePeerAndHandler(m net.Conn) (*peer, *fsmHandler) {
-	fsm := newFSM(&oc.Global{}, &oc.Neighbor{}, log.NewDefaultLogger())
+	p := &peer{}
+	fsm := newFSM(&oc.Global{}, &oc.Neighbor{}, log.NewDefaultLogger(), p)
 	fsm.conn = m
-
-	p := &peer{fsm: fsm}
+	p.fsm = fsm
 
 	h := &fsmHandler{
 		fsm:           fsm,

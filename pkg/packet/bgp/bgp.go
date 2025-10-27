@@ -11724,70 +11724,27 @@ func (p *PathAttributeMpReachNLRI) String() string {
 	return fmt.Sprintf("{MpReach(%s): {Nexthop: %s, NLRIs: %s}}", NewFamily(p.AFI, p.SAFI), p.Nexthop, p.Value)
 }
 
-func NewPathAttributeMpReachNLRI(family Family, nlris []AddrPrefixInterface, nextHops ...netip.Addr) (*PathAttributeMpReachNLRI, error) {
-	if len(nlris) == 0 {
-		return nil, fmt.Errorf("no NLRI provided")
+func NewPathAttributeMpReachNLRI(family Family, value []AddrPrefixInterface, nexthop netip.Addr) (*PathAttributeMpReachNLRI, error) {
+	return NewPathAttributeMpReachNLRIwithNexthops(family, value, nexthop.AsSlice(), nil)
+}
+
+func NewPathAttributeMpReachNLRIwithNexthops(family Family, value []AddrPrefixInterface, nexthop, linkLocalNexthop net.IP) (*PathAttributeMpReachNLRI, error) {
+	a := &PathAttributeMpReachNLRI{
+		PathAttribute: PathAttribute{
+			Flags: BGP_ATTR_FLAG_OPTIONAL,
+			Type:  BGP_ATTR_TYPE_MP_REACH_NLRI,
+		},
+		AFI:     family.Afi(),
+		SAFI:    family.Safi(),
+		Value:   value,
+		Nexthop: netip.MustParseAddr(nexthop.String()),
 	}
-	// AFI(2) + SAFI(1) + NexthopLength(1) + Nexthop(variable)
-	// + Reserved(1) + NLRI(variable)
-	l := 5
-	afi := family.Afi()
-	safi := family.Safi()
-	// TODO: return error
-
-	nhs := []netip.Addr{}
-	nhlen := 0
-
-	if len(nextHops) > 0 {
-		isNexthopIPv6 := afi == AFI_IP6 && nextHops[0].IsValid() && nextHops[0].Is6()
-		if isNexthopIPv6 {
-			nhs = append(nhs, nextHops[0])
-			// if nexthop is v4, it needs to be serialized as IPv4-mapped IPv6 address.
-			nhlen = BGP_ATTR_NHLEN_IPV6_GLOBAL
-			if len(nextHops) > 1 && nextHops[1].IsValid() && nextHops[1].IsLinkLocalUnicast() {
-				nhlen = BGP_ATTR_NHLEN_IPV6_GLOBAL_AND_LL
-				nhs = append(nhs, nextHops[1])
-			}
-		} else if nextHops[0].IsValid() {
-			nhlen = BGP_ATTR_NHLEN_IPV4
-			nhs = append(nhs, nextHops[0])
+	if family.Afi() == AFI_IP6 {
+		if linkLocalNexthop != nil && len(linkLocalNexthop) > 0 {
+			a.LinkLocalNexthop = netip.MustParseAddr(linkLocalNexthop.String())
 		}
 	}
-
-	switch safi {
-	case SAFI_FLOW_SPEC_VPN, SAFI_FLOW_SPEC_UNICAST:
-	// Should not have Nexthop
-	case SAFI_MPLS_VPN:
-		l += BGP_ATTR_NHLEN_VPN_RD
-		fallthrough
-	default:
-		l += nhlen
-	}
-
-	for _, n := range nlris {
-		l += n.Len()
-	}
-	t := BGP_ATTR_TYPE_MP_REACH_NLRI
-	p := &PathAttributeMpReachNLRI{
-		PathAttribute: PathAttribute{
-			Flags:  getPathAttrFlags(t, l),
-			Type:   t,
-			Length: uint16(l),
-		},
-		AFI:   afi,
-		SAFI:  safi,
-		Value: nlris,
-	}
-
-	switch len(nhs) {
-	case 2:
-		p.LinkLocalNexthop = nhs[1]
-		fallthrough
-	case 1:
-		p.Nexthop = nhs[0]
-	}
-
-	return p, nil
+	return a, nil
 }
 
 type PathAttributeMpUnreachNLRI struct {

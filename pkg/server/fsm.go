@@ -198,6 +198,7 @@ type fsm struct {
 	notification         chan *bgp.BGPMessage
 	logger               log.Logger
 	longLivedRunning     bool
+	peer                 *peer
 }
 
 func (fsm *fsm) bgpMessageStateUpdate(MessageType uint8, isIn bool) {
@@ -265,7 +266,7 @@ func (fsm *fsm) bmpStatsUpdate(statType uint16, increment int) {
 	}
 }
 
-func newFSM(gConf *oc.Global, pConf *oc.Neighbor, logger log.Logger) *fsm {
+func newFSM(gConf *oc.Global, pConf *oc.Neighbor, logger log.Logger, peer *peer) *fsm {
 	adminState := adminStateUp
 	if pConf.Config.AdminDown {
 		adminState = adminStateDown
@@ -286,6 +287,7 @@ func newFSM(gConf *oc.Global, pConf *oc.Neighbor, logger log.Logger) *fsm {
 		gracefulRestartTimer: time.NewTimer(time.Hour),
 		notification:         make(chan *bgp.BGPMessage, 1),
 		logger:               logger,
+		peer:                 peer,
 	}
 	fsm.gracefulRestartTimer.Stop()
 	return fsm
@@ -295,37 +297,12 @@ func (fsm *fsm) StateChange(nextState bgp.FSMState) {
 	fsm.lock.Lock()
 	defer fsm.lock.Unlock()
 
-	fsm.logger.Debug("state changed",
-		log.Fields{
-			"Topic":  "Peer",
-			"Key":    fsm.pConf.State.NeighborAddress,
-			"old":    fsm.state.String(),
-			"new":    nextState.String(),
-			"reason": fsm.reason,
-		})
+	fsm.pConf.State.SessionState = oc.IntToSessionStateMap[int(nextState)]
 	fsm.state = nextState
+
 	switch nextState {
 	case bgp.BGP_FSM_ESTABLISHED:
 		fsm.pConf.Timers.State.Uptime = time.Now().Unix()
-		fsm.pConf.State.EstablishedCount++
-		// reset the state set by the previous session
-		fsm.twoByteAsTrans = false
-		if _, y := fsm.capMap[bgp.BGP_CAP_FOUR_OCTET_AS_NUMBER]; !y {
-			fsm.twoByteAsTrans = true
-			break
-		}
-		y := func() bool {
-			for _, c := range capabilitiesFromConfig(fsm.pConf) {
-				switch c.(type) {
-				case *bgp.CapFourOctetASNumber:
-					return true
-				}
-			}
-			return false
-		}()
-		if !y {
-			fsm.twoByteAsTrans = true
-		}
 	default:
 		fsm.pConf.Timers.State.Downtime = time.Now().Unix()
 	}

@@ -137,7 +137,9 @@ func setDefaultNeighborConfigValuesWithViper(v *viper.Viper, n *Neighbor, g *Glo
 		if err != nil {
 			return err
 		}
-		n.State.NeighborAddress = addr
+		if addr != "" {
+			n.State.NeighborAddress = addr
+		}
 	}
 
 	if n.Transport.Config.LocalAddress == "" {

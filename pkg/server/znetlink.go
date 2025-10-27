@@ -17,13 +17,14 @@ package server
 
 import (
 	"net"
+	"net/netip"
 	"time"
 
 	"github.com/osrg/gobgp/v4/internal/pkg/table"
 	"github.com/osrg/gobgp/v4/pkg/log"
 	"github.com/osrg/gobgp/v4/pkg/netlink"
 	"github.com/osrg/gobgp/v4/pkg/packet/bgp"
-	custom_net "github.com/osrg/gobgp/v4/pkg/netutils"
+	custom_net "github.com/osrg/gobgp/v4/internal/pkg/netutils"
 	go_netlink "github.com/vishvananda/netlink"
 )
 
@@ -156,16 +157,17 @@ func (n *netlinkClient) ipNetsToPaths(routes []*custom_net.ConnectedRoute, iface
 		origin := bgp.NewPathAttributeOrigin(bgp.BGP_ORIGIN_ATTR_TYPE_IGP)
 		pattr = append(pattr, origin)
 
-		nexthop := bgp.NewPathAttributeNextHop("0.0.0.0")
-		pattr = append(pattr, nexthop)
-
 		family := bgp.RF_IPv4_UC
 		if route.Prefix.IP.To4() == nil {
 			family = bgp.RF_IPv6_UC
+			mpreach, _ := bgp.NewPathAttributeMpReachNLRI(family, []bgp.AddrPrefixInterface{nlri}, netip.MustParseAddr("::"))
+			pattr = append(pattr, mpreach)
+		} else {
+			nexthop := bgp.NewPathAttributeNextHop("0.0.0.0")
+			pattr = append(pattr, nexthop)
 		}
 
-		source := table.NewNetlinkPeerInfo(iface)
-		source.IsNetlink = true
+		source := table.NewNetlinkPeerInfo(iface, n.server.logger)
 
 		path := table.NewPath(family, source, nlri, false, pattr, time.Now(), false)
 		path.SetIsFromExternal(true)

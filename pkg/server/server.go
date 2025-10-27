@@ -110,27 +110,27 @@ func newSharedData() *sharedData {
 }
 
 type BgpServer struct {
-	shared         *sharedData
-	apiServer      *server
-	bgpConfig      oc.Bgp
-	acceptCh       chan net.Conn
-	mgmtCh         chan *mgmtOp
-	policy         *table.RoutingPolicy
-	listeners      []*netutils.TCPListener
-	neighborMap    map[string]*peer
-	peerGroupMap   map[string]*peerGroup
-	globalRib      *table.TableManager
-	rsRib          *table.TableManager
-	roaManager     *roaManager
-	shutdownWG     *sync.WaitGroup
-	watcherMap     map[watchEventType][]*watcher
-	zclient        *zebraClient
-	bmpManager     *bmpClientManager
-	mrtManager     *mrtManager
-	roaTable       *table.ROATable
-	uuidMap        map[string]uuid.UUID
-	logger         log.Logger
-	timingHook     FSMTimingHook
+	shared        *sharedData
+	apiServer     *server
+	bgpConfig     oc.Bgp
+	acceptCh      chan net.Conn
+	mgmtCh        chan *mgmtOp
+	policy        *table.RoutingPolicy
+	listeners     []*netutils.TCPListener
+	neighborMap   map[string]*peer
+	peerGroupMap  map[string]*peerGroup
+	globalRib     *table.TableManager
+	rsRib         *table.TableManager
+	roaManager    *roaManager
+	shutdownWG    *sync.WaitGroup
+	watcherMap    map[watchEventType][]*watcher
+	zclient       *zebraClient
+	bmpManager    *bmpClientManager
+	mrtManager    *mrtManager
+	roaTable      *table.ROATable
+	uuidMap       map[string]uuid.UUID
+	logger        log.Logger
+	timingHook    FSMTimingHook
 	netlinkClient *netlinkClient
 }
 
@@ -1190,6 +1190,10 @@ func (s *BgpServer) handleRouteRefresh(peer *peer, e *fsmMsg) []*table.Path {
 }
 
 func (s *BgpServer) propagateUpdate(peer *peer, pathList []*table.Path) {
+	s.logger.Debug("propagate update", log.Fields{
+		"Topic": "propagate",
+		"Path":  pathList,
+	})
 	rs := peer != nil && peer.isRouteServerClient()
 	vrf := false
 	if peer != nil {
@@ -1666,9 +1670,69 @@ func (s *BgpServer) handleFSMMessage(peer *peer, e *fsmMsg) {
 				netip.MustParseAddr(peer.fsm.pConf.State.RemoteRouterId),
 				netip.MustParseAddr(peer.fsm.gConf.Config.RouterId), remoteAddr, localAddr)
 
+			// Read interface name from config while we have the lock
+			interfaceName := peer.fsm.pConf.Config.NeighborInterface
+
 			neighborAddress := peer.fsm.pConf.State.NeighborAddress
 
 			peer.fsm.lock.Unlock()
+
+			// Now do I/O operations without holding the lock
+			// Determine which interface to use for nexthop lookup
+			if interfaceName == "" && localTCP.Zone != "" {
+				// For link-local connections, use the zone as interface name
+				interfaceName = localTCP.Zone
+			}
+			if interfaceName == "" {
+				// Try to determine interface from local TCP address
+				ifName, err := netutils.GetInterfaceByIP(localTCP.IP)
+				if err != nil {
+					s.logger.Debug("could not determine interface from local address",
+						log.Fields{"Topic": "Peer", "Key": peer.ID(), "LocalAddr": localTCP.IP, "Error": err})
+				} else {
+					interfaceName = ifName
+					s.logger.Debug("determined interface from local address",
+						log.Fields{"Topic": "Peer", "Key": peer.ID(), "LocalAddr": localTCP.IP, "Interface": interfaceName})
+				}
+			}
+
+			// Populate IPv4 nexthop
+			if localTCP.IP.To4() != nil {
+				// IPv4 TCP session - use TCP address as primary
+				peer.peerInfo.IPv4Nexthop = localTCP.IP
+			}
+			// Try to get IPv4 from interface (might override TCP address, or provide it if TCP is IPv6)
+			if interfaceName != "" {
+				if ipv4, err := netutils.GetIPv4Nexthop(interfaceName, s.logger); err == nil {
+					peer.peerInfo.IPv4Nexthop = ipv4.To4()
+					s.logger.Debug("Set IPv4 nexthop from interface",
+						log.Fields{"Topic": "Peer", "Key": peer.ID(), "IPv4Nexthop": peer.peerInfo.IPv4Nexthop})
+				}
+			}
+
+			// Populate IPv6 nexthops
+			if localTCP.IP.To4() == nil {
+				// IPv6 TCP session - use TCP address as primary
+				peer.peerInfo.IPv6Nexthop = localTCP.IP
+			}
+			// Try to get IPv6 from interface (might override TCP address, or provide it if TCP is IPv4)
+			if interfaceName != "" {
+				if ipv6nexthops, err := netutils.GetIPv6Nexthops(interfaceName, s.logger); err == nil {
+					if ipv6nexthops.Global != nil {
+						// Ensure IPv6 address is in 16-byte format
+						peer.peerInfo.IPv6Nexthop = ipv6nexthops.Global.To16()
+						s.logger.Debug("Set IPv6 nexthop from interface",
+							log.Fields{"Topic": "Peer", "Key": peer.ID(), "IPv6Nexthop": peer.peerInfo.IPv6Nexthop})
+					}
+					if ipv6nexthops.LinkLocal != nil {
+						// Ensure IPv6 address is in 16-byte format
+						peer.peerInfo.IPv6LinkLocalNexthop = ipv6nexthops.LinkLocal.To16()
+						s.logger.Debug("Set IPv6 link-local nexthop from interface",
+							log.Fields{"Topic": "Peer", "Key": peer.ID(), "IPv6LinkLocal": peer.peerInfo.IPv6LinkLocalNexthop})
+					}
+				}
+			}
+
 			deferralExpiredFunc := func(family bgp.Family) func() {
 				//nolint: errcheck // ignore error
 				return func() {
@@ -3244,6 +3308,18 @@ func (s *BgpServer) ListPeer(ctx context.Context, r *api.ListPeerRequest, fn fun
 					}
 				}
 			}
+			// Populate nexthop information from peerInfo
+			if peer.peerInfo != nil {
+				if peer.peerInfo.IPv4Nexthop != nil && len(peer.peerInfo.IPv4Nexthop) > 0 {
+					p.State.Ipv4Nexthop = peer.peerInfo.IPv4Nexthop.String()
+				}
+				if peer.peerInfo.IPv6Nexthop != nil && len(peer.peerInfo.IPv6Nexthop) > 0 {
+					p.State.Ipv6Nexthop = peer.peerInfo.IPv6Nexthop.String()
+				}
+				if peer.peerInfo.IPv6LinkLocalNexthop != nil && len(peer.peerInfo.IPv6LinkLocalNexthop) > 0 {
+					p.State.Ipv6LinkLocalNexthop = peer.peerInfo.IPv6LinkLocalNexthop.String()
+				}
+			}
 			l = append(l, p)
 		}
 		return nil
@@ -3302,6 +3378,8 @@ func (s *BgpServer) addNeighbor(c *oc.Neighbor) error {
 		return err
 	}
 
+	peerInfo := table.NewPeerInfo(&s.bgpConfig.Global, c, 0, 0, netip.Addr{}, netip.Addr{}, netip.Addr{}, netip.Addr{})
+
 	if vrf := c.Config.Vrf; vrf != "" {
 		if c.RouteServer.Config.RouteServerClient {
 			return fmt.Errorf("route server client can't be enslaved to VRF")
@@ -3346,7 +3424,7 @@ func (s *BgpServer) addNeighbor(c *oc.Neighbor) error {
 	if c.RouteServer.Config.RouteServerClient {
 		rib = s.rsRib
 	}
-	peer := newPeer(&s.bgpConfig.Global, c, rib, s.policy, s.logger)
+	peer := newPeer(&s.bgpConfig.Global, c, rib, s.policy, s.logger, peerInfo)
 	if err := s.policy.SetPeerPolicy(peer.ID(), c.ApplyPolicy); err != nil {
 		return fmt.Errorf("failed to set peer policy for %s: %v", addr, err)
 	}

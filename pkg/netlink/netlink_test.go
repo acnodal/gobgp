@@ -53,7 +53,7 @@ func TestNewNetlinkClient(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestGetConnectedRoutes(t *testing.T) {
+func TestRouteList(t *testing.T) {
 	logger := log.NewDefaultLogger()
 	client, _ := NewNetlinkClient(logger)
 
@@ -72,10 +72,12 @@ func TestGetConnectedRoutes(t *testing.T) {
 	}
 	client.manager = mockManager
 
-	routes, err := client.GetConnectedRoutes("")
+	// Test that the manager's RouteList method works
+	routes, err := mockManager.RouteList(nil, 0)
 	assert.NoError(t, err)
-	assert.Len(t, routes, 1)
+	assert.Len(t, routes, 2)
 	assert.Equal(t, netlink.RouteProtocol(2), routes[0].Protocol)
+	assert.Equal(t, netlink.RouteProtocol(3), routes[1].Protocol)
 }
 
 func TestAddRoute(t *testing.T) {

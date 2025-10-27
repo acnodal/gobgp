@@ -877,6 +877,9 @@ message PeerState {
   repeated Capability remote_cap = 18;
   repeated Capability local_cap = 19;
   string router_id = 20;
+  string ipv4_nexthop = 21;
+  string ipv6_nexthop = 22;
+  string ipv6_link_local_nexthop = 23;
 }
 
 message Messages {
