@@ -1465,6 +1465,9 @@ type Vrf struct {
 	// original -> gobgp:vrf-state
 	// Configured states of VRF.
 	State VrfState `mapstructure:"state" json:"state,omitempty"`
+	// original -> gobgp:netlink-import
+	// Netlink import configuration for this VRF.
+	NetlinkImport NetlinkImport `mapstructure:"netlink-import" json:"netlink-import,omitempty"`
 }
 
 func (lhs *Vrf) Equal(rhs *Vrf) bool {

@@ -32,7 +32,9 @@ type netlinkClient struct {
 	client          *netlink.NetlinkClient
 	server          *BgpServer
 	dead            chan struct{}
-	advertisedPaths map[string]*table.Path
+	// advertisedPaths tracks paths per VRF (vrf name -> prefix -> path)
+	// empty string key is used for global table
+	advertisedPaths map[string]map[string]*table.Path
 }
 
 func newNetlinkClient(s *BgpServer) (*netlinkClient, error) {
@@ -45,7 +47,7 @@ func newNetlinkClient(s *BgpServer) (*netlinkClient, error) {
 		client:          n,
 		server:          s,
 		dead:            make(chan struct{}),
-		advertisedPaths: make(map[string]*table.Path),
+		advertisedPaths: make(map[string]map[string]*table.Path),
 	}
 	w.runImport()
 	go w.loop()
@@ -53,21 +55,37 @@ func newNetlinkClient(s *BgpServer) (*netlinkClient, error) {
 }
 
 func (n *netlinkClient) runImport() {
-	if !n.server.bgpConfig.Netlink.Import.Enabled {
-		return
+	// Import for global table
+	if n.server.bgpConfig.Netlink.Import.Enabled {
+		vrfName := n.server.bgpConfig.Netlink.Import.Vrf
+		interfaces := n.server.bgpConfig.Netlink.Import.InterfaceList
+		n.importForVrf(vrfName, interfaces)
 	}
-	vrf := n.server.bgpConfig.Netlink.Import.Vrf
-	interfaces := n.server.bgpConfig.Netlink.Import.InterfaceList
-	
-	currentPaths := make(map[string]*table.Path)
-	newPathList := make([]*table.Path, 0)
 
+	// Import for each VRF with netlink-import configured
+	for _, vrf := range n.server.bgpConfig.Vrfs {
+		if vrf.NetlinkImport.Enabled {
+			n.importForVrf(vrf.Config.Name, vrf.NetlinkImport.InterfaceList)
+		}
+	}
+}
+
+func (n *netlinkClient) importForVrf(vrfName string, interfaces []string) {
+	// Initialize VRF tracking if needed
+	if n.advertisedPaths[vrfName] == nil {
+		n.advertisedPaths[vrfName] = make(map[string]*table.Path)
+	}
+
+	currentPaths := make(map[string]*table.Path)
+
+	// Scan interfaces for this VRF
 	for _, iface := range interfaces {
 		routes, err := custom_net.GetGlobalUnicastRoutes(iface, n.server.logger)
 		if err != nil {
 			n.server.logger.Error("failed to get connected routes",
 				log.Fields{
 					"Topic":     "netlink",
+					"VRF":       vrfName,
 					"Interface": iface,
 					"Error":     err,
 				})
@@ -80,44 +98,48 @@ func (n *netlinkClient) runImport() {
 	}
 
 	// Find new paths to add
+	newPathList := make([]*table.Path, 0)
 	for key, path := range currentPaths {
-		if _, ok := n.advertisedPaths[key]; !ok {
+		if _, ok := n.advertisedPaths[vrfName][key]; !ok {
 			newPathList = append(newPathList, path)
 		}
 	}
 
 	// Find old paths to withdraw
 	withdrawnPathList := make([]*table.Path, 0)
-	for key, path := range n.advertisedPaths {
+	for key, path := range n.advertisedPaths[vrfName] {
 		if _, ok := currentPaths[key]; !ok {
 			n.server.logger.Debug("Withdrawing route from netlink",
 				log.Fields{
 					"Topic": "netlink",
+					"VRF":   vrfName,
 					"Route": path.GetNlri().String(),
 				})
 			withdrawnPathList = append(withdrawnPathList, path.Clone(true))
 		}
 	}
 
-	// Update advertised paths
-	n.advertisedPaths = currentPaths
+	// Update advertised paths for this VRF
+	n.advertisedPaths[vrfName] = currentPaths
 
 	// Propagate changes
 	if len(newPathList) > 0 {
-		if err := n.server.addPathList(vrf, newPathList); err != nil {
+		if err := n.server.addPathList(vrfName, newPathList); err != nil {
 			n.server.logger.Error("failed to add path from netlink",
 				log.Fields{
 					"Topic": "netlink",
+					"VRF":   vrfName,
 					"Error": err,
 				})
 		}
 	}
 
 	if len(withdrawnPathList) > 0 {
-		if err := n.server.addPathList(vrf, withdrawnPathList); err != nil {
+		if err := n.server.addPathList(vrfName, withdrawnPathList); err != nil {
 			n.server.logger.Error("failed to withdraw path from netlink",
 				log.Fields{
 					"Topic": "netlink",
+					"VRF":   vrfName,
 					"Error": err,
 				})
 		}
