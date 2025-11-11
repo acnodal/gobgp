@@ -16,8 +16,8 @@
 package server
 
 import (
-	"net"
 	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/osrg/gobgp/v4/internal/pkg/table"
@@ -25,8 +25,17 @@ import (
 	"github.com/osrg/gobgp/v4/pkg/netlink"
 	"github.com/osrg/gobgp/v4/pkg/packet/bgp"
 	custom_net "github.com/osrg/gobgp/v4/internal/pkg/netutils"
-	go_netlink "github.com/vishvananda/netlink"
 )
+
+type netlinkImportStats struct {
+	Imported        uint64
+	Withdrawn       uint64
+	Errors          uint64
+	LastImport      time.Time
+	LastWithdraw    time.Time
+	LastError       time.Time
+	LastErrorMsg    string
+}
 
 type netlinkClient struct {
 	client          *netlink.NetlinkClient
@@ -35,6 +44,8 @@ type netlinkClient struct {
 	// advertisedPaths tracks paths per VRF (vrf name -> prefix -> path)
 	// empty string key is used for global table
 	advertisedPaths map[string]map[string]*table.Path
+	stats           netlinkImportStats
+	statsMu         sync.RWMutex
 }
 
 func newNetlinkClient(s *BgpServer) (*netlinkClient, error) {
@@ -131,6 +142,16 @@ func (n *netlinkClient) importForVrf(vrfName string, interfaces []string) {
 					"VRF":   vrfName,
 					"Error": err,
 				})
+			n.statsMu.Lock()
+			n.stats.Errors++
+			n.stats.LastError = time.Now()
+			n.stats.LastErrorMsg = err.Error()
+			n.statsMu.Unlock()
+		} else {
+			n.statsMu.Lock()
+			n.stats.Imported += uint64(len(newPathList))
+			n.stats.LastImport = time.Now()
+			n.statsMu.Unlock()
 		}
 	}
 
@@ -142,6 +163,16 @@ func (n *netlinkClient) importForVrf(vrfName string, interfaces []string) {
 					"VRF":   vrfName,
 					"Error": err,
 				})
+			n.statsMu.Lock()
+			n.stats.Errors++
+			n.stats.LastError = time.Now()
+			n.stats.LastErrorMsg = err.Error()
+			n.statsMu.Unlock()
+		} else {
+			n.statsMu.Lock()
+			n.stats.Withdrawn += uint64(len(withdrawnPathList))
+			n.stats.LastWithdraw = time.Now()
+			n.statsMu.Unlock()
 		}
 	}
 }
@@ -198,39 +229,9 @@ func (n *netlinkClient) ipNetsToPaths(routes []*custom_net.ConnectedRoute, iface
 	return pathList
 }
 
-func (n *netlinkClient) exportRoute(path *table.Path) error {
-	if path.IsWithdraw {
-		// TODO: handle withdraw
-		return nil
-	}
-
-	if !n.shouldExport(path) {
-		return nil
-	}
-
-	nlri := path.GetNlri()
-	if nlri == nil {
-		return nil
-	}
-
-	_, dst, err := net.ParseCIDR(nlri.String())
-	if err != nil {
-		return err
-	}
-
-	route := &go_netlink.Route{
-		Dst:      dst,
-		Gw:       path.GetNexthop().AsSlice(),
-		Protocol: 2, // kernel
-	}
-
-	return n.client.AddRoute(route)
-}
-
-func (n *netlinkClient) shouldExport(path *table.Path) bool {
-	if !n.server.bgpConfig.Netlink.Export.Enabled {
-		return false
-	}
-	// TODO: add community support
-	return true
+// getStats returns a copy of the current import statistics
+func (n *netlinkClient) getStats() netlinkImportStats {
+	n.statsMu.RLock()
+	defer n.statsMu.RUnlock()
+	return n.stats
 }

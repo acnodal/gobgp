@@ -228,7 +228,7 @@ func main() {
 		)
 	}
 
-	logger.Info("gobgpd started")
+	logger.Infof("gobgpd %s started", version.Version())
 	bgpLogger := &builtinLogger{logger: logger, cfgStrict: opts.ConfigStrict}
 	fsmTimingCollector := metrics.NewFSMTimingsCollector()
 	bgpServer := server.NewBgpServer(

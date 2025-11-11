@@ -505,5 +505,17 @@ func UpdateConfig(ctx context.Context, bgpServer *server.BgpServer, c, newConfig
 				log.Fields{"Topic": "config", "Error": err})
 		}
 	}
+
+	// Update netlink configuration
+	if !newConfig.Netlink.Equal(&c.Netlink) {
+		bgpServer.Log().Info("netlink config changed, updating",
+			log.Fields{"Topic": "config"})
+		bgpServer.GetBgpConfig().Netlink = newConfig.Netlink
+		if err := bgpServer.StartNetlink(ctx); err != nil {
+			bgpServer.Log().Warn("failed to update netlink config",
+				log.Fields{"Topic": "config", "Error": err})
+		}
+	}
+
 	return newConfig, nil
 }

@@ -1299,11 +1299,110 @@ type NetlinkImport struct {
 
 // struct for container gobgp:netlink-export.
 type NetlinkExport struct {
-	Enabled            bool     `mapstructure:"enabled" json:"enabled,omitempty"`
-	Vrf                string   `mapstructure:"vrf" json:"vrf,omitempty"`
-	Community          string   `mapstructure:"community" json:"community,omitempty"`
+	Enabled            bool                 `mapstructure:"enabled" json:"enabled,omitempty"`
+	DampeningInterval  uint32               `mapstructure:"dampening-interval" json:"dampening-interval,omitempty"` // milliseconds
+	RouteProtocol      int                  `mapstructure:"route-protocol" json:"route-protocol,omitempty"`         // RTPROT_* value (default: 186)
+	Rules              []NetlinkExportRule  `mapstructure:"rules" json:"rules,omitempty"`
+}
+
+// struct for container gobgp:netlink-export-rule.
+type NetlinkExportRule struct {
+	Name               string   `mapstructure:"name" json:"name,omitempty"`
 	CommunityList      []string `mapstructure:"community-list" json:"community-list,omitempty"`
 	LargeCommunityList []string `mapstructure:"large-community-list" json:"large-community-list,omitempty"`
+	Vrf                string   `mapstructure:"vrf" json:"vrf,omitempty"`
+	TableId            int      `mapstructure:"table-id" json:"table-id,omitempty"`
+	Metric             uint32   `mapstructure:"metric" json:"metric,omitempty"`
+	ValidateNexthop    *bool    `mapstructure:"validate-nexthop" json:"validate-nexthop,omitempty"` // pointer to distinguish unset from false
+}
+
+func (lhs *NetlinkImport) Equal(rhs *NetlinkImport) bool {
+	if lhs == nil || rhs == nil {
+		return false
+	}
+	if lhs.Enabled != rhs.Enabled {
+		return false
+	}
+	if lhs.Vrf != rhs.Vrf {
+		return false
+	}
+	if len(lhs.InterfaceList) != len(rhs.InterfaceList) {
+		return false
+	}
+	for idx, l := range lhs.InterfaceList {
+		if l != rhs.InterfaceList[idx] {
+			return false
+		}
+	}
+	return true
+}
+
+func (lhs *NetlinkExport) Equal(rhs *NetlinkExport) bool {
+	if lhs == nil || rhs == nil {
+		return false
+	}
+	if lhs.Enabled != rhs.Enabled {
+		return false
+	}
+	if lhs.DampeningInterval != rhs.DampeningInterval {
+		return false
+	}
+	if lhs.RouteProtocol != rhs.RouteProtocol {
+		return false
+	}
+	if len(lhs.Rules) != len(rhs.Rules) {
+		return false
+	}
+	for idx, l := range lhs.Rules {
+		if !l.Equal(&rhs.Rules[idx]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (lhs *NetlinkExportRule) Equal(rhs *NetlinkExportRule) bool {
+	if lhs == nil || rhs == nil {
+		return false
+	}
+	if lhs.Name != rhs.Name {
+		return false
+	}
+	if lhs.Vrf != rhs.Vrf {
+		return false
+	}
+	if lhs.TableId != rhs.TableId {
+		return false
+	}
+	if lhs.Metric != rhs.Metric {
+		return false
+	}
+	// Compare ValidateNexthop (pointer comparison)
+	if (lhs.ValidateNexthop == nil) != (rhs.ValidateNexthop == nil) {
+		return false
+	}
+	if lhs.ValidateNexthop != nil && *lhs.ValidateNexthop != *rhs.ValidateNexthop {
+		return false
+	}
+	// Compare community lists
+	if len(lhs.CommunityList) != len(rhs.CommunityList) {
+		return false
+	}
+	for idx, l := range lhs.CommunityList {
+		if l != rhs.CommunityList[idx] {
+			return false
+		}
+	}
+	// Compare large community lists
+	if len(lhs.LargeCommunityList) != len(rhs.LargeCommunityList) {
+		return false
+	}
+	for idx, l := range lhs.LargeCommunityList {
+		if l != rhs.LargeCommunityList[idx] {
+			return false
+		}
+	}
+	return true
 }
 
 func (lhs *Netlink) Equal(rhs *Netlink) bool {
@@ -1311,6 +1410,14 @@ func (lhs *Netlink) Equal(rhs *Netlink) bool {
 		return false
 	}
 	if !lhs.Config.Equal(&(rhs.Config)) {
+		return false
+	}
+	// Compare Import config
+	if !lhs.Import.Equal(&(rhs.Import)) {
+		return false
+	}
+	// Compare Export config
+	if !lhs.Export.Equal(&(rhs.Export)) {
 		return false
 	}
 	return true

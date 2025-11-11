@@ -99,6 +99,11 @@ service GoBgpService {
 
   rpc GetNetlink(GetNetlinkRequest) returns (GetNetlinkResponse);
   rpc EnableNetlink(EnableNetlinkRequest) returns (EnableNetlinkResponse);
+  rpc GetNetlinkImportStats(GetNetlinkImportStatsRequest) returns (GetNetlinkImportStatsResponse);
+  rpc ListNetlinkExport(ListNetlinkExportRequest) returns (stream ListNetlinkExportResponse);
+  rpc GetNetlinkExportStats(GetNetlinkExportStatsRequest) returns (GetNetlinkExportStatsResponse);
+  rpc FlushNetlinkExport(FlushNetlinkExportRequest) returns (FlushNetlinkExportResponse);
+  rpc ListNetlinkExportRules(ListNetlinkExportRulesRequest) returns (ListNetlinkExportRulesResponse);
 
   rpc EnableMrt(EnableMrtRequest) returns (EnableMrtResponse);
   rpc DisableMrt(DisableMrtRequest) returns (DisableMrtResponse);
@@ -118,9 +123,6 @@ message GetNetlinkResponse {
 	bool export_enabled = 2;
 	string vrf = 3;
 	repeated string interfaces = 4;
-	string community_name = 5;
-	repeated string community_list = 6;
-	repeated string large_community_list = 7;
 }
 
 message StartBgpRequest {
@@ -592,6 +594,69 @@ message EnableNetlinkRequest {
 }
  
 message EnableNetlinkResponse {}
+
+message ListNetlinkExportRequest {
+	string vrf = 1; // Filter by VRF name (empty = all VRFs)
+}
+
+message ListNetlinkExportResponse {
+	message ExportedRoute {
+		string prefix = 1;
+		string nexthop = 2;
+		string vrf = 3;
+		int32 table_id = 4;
+		uint32 metric = 5;
+		string rule_name = 6;
+		int64 exported_at = 7; // Unix timestamp
+	}
+	ExportedRoute route = 1;
+}
+
+message GetNetlinkExportStatsRequest {}
+
+message GetNetlinkExportStatsResponse {
+	uint64 exported = 1;
+	uint64 withdrawn = 2;
+	uint64 errors = 3;
+	uint64 nexthop_validation_attempts = 4;
+	uint64 nexthop_validation_failures = 5;
+	uint64 dampened_updates = 6;
+	int64 last_export_time = 7; // Unix timestamp
+	int64 last_withdraw_time = 8; // Unix timestamp
+	int64 last_error_time = 9; // Unix timestamp
+	string last_error_msg = 10;
+}
+
+message FlushNetlinkExportRequest {}
+
+message FlushNetlinkExportResponse {}
+
+message ListNetlinkExportRulesRequest {}
+
+message ListNetlinkExportRulesResponse {
+	message ExportRule {
+		string name = 1;
+		repeated string community_list = 2;
+		repeated string large_community_list = 3;
+		string vrf = 4;
+		int32 table_id = 5;
+		uint32 metric = 6;
+		bool validate_nexthop = 7;
+	}
+	repeated ExportRule rules = 1;
+}
+
+message GetNetlinkImportStatsRequest {}
+
+message GetNetlinkImportStatsResponse {
+	uint64 imported = 1;
+	uint64 withdrawn = 2;
+	uint64 errors = 3;
+	int64 last_import_time = 4; // Unix timestamp
+	int64 last_withdraw_time = 5; // Unix timestamp
+	int64 last_error_time = 6; // Unix timestamp
+	string last_error_msg = 7;
+}
 
 
 message EnableMrtRequest {

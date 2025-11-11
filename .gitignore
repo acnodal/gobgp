@@ -8,6 +8,7 @@ cmd/gobgpd/gobgpd
 gobgp
 gobgpd
 
+
 # Folders
 _obj
 _test
@@ -34,3 +35,6 @@ test/scenario_test/nosetest*.xml
 # IDE workspace
 .idea
 .vscode
+
+# Misc
+*.bak

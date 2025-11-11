@@ -808,6 +808,33 @@ func (s *server) GetNetlink(ctx context.Context, r *api.GetNetlinkRequest) (*api
 	return s.bgpServer.GetNetlink(ctx, r)
 }
 
+func (s *server) GetNetlinkImportStats(ctx context.Context, r *api.GetNetlinkImportStatsRequest) (*api.GetNetlinkImportStatsResponse, error) {
+	return s.bgpServer.GetNetlinkImportStats(ctx, r)
+}
+
+func (s *server) ListNetlinkExport(r *api.ListNetlinkExportRequest, stream api.GoBgpService_ListNetlinkExportServer) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fn := func(rsp *api.ListNetlinkExportResponse) {
+		if err := stream.Send(rsp); err != nil {
+			cancel()
+		}
+	}
+	return s.bgpServer.ListNetlinkExport(ctx, r, fn)
+}
+
+func (s *server) GetNetlinkExportStats(ctx context.Context, r *api.GetNetlinkExportStatsRequest) (*api.GetNetlinkExportStatsResponse, error) {
+	return s.bgpServer.GetNetlinkExportStats(ctx, r)
+}
+
+func (s *server) FlushNetlinkExport(ctx context.Context, r *api.FlushNetlinkExportRequest) (*api.FlushNetlinkExportResponse, error) {
+	return s.bgpServer.FlushNetlinkExport(ctx, r)
+}
+
+func (s *server) ListNetlinkExportRules(ctx context.Context, r *api.ListNetlinkExportRulesRequest) (*api.ListNetlinkExportRulesResponse, error) {
+	return s.bgpServer.ListNetlinkExportRules(ctx, r)
+}
+
 func (s *server) ListVrf(r *api.ListVrfRequest, stream api.GoBgpService_ListVrfServer) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
