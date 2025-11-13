@@ -193,6 +193,39 @@ func showNetlinkExportRules() error {
 		fmt.Println()
 	}
 
+	// Display VRF export rules
+	if len(res.VrfRules) > 0 {
+		fmt.Println("Per-VRF Export Rules:")
+		fmt.Println()
+
+		for _, vrfRule := range res.VrfRules {
+			fmt.Printf("VRF: %s → Linux VRF: %s\n", vrfRule.GobgpVrf, vrfRule.LinuxVrf)
+			fmt.Printf("  Linux Table ID:   %d\n", vrfRule.LinuxTableId)
+			fmt.Printf("  Metric:           %d\n", vrfRule.Metric)
+			fmt.Printf("  Validate Nexthop: %t\n", vrfRule.ValidateNexthop)
+
+			if len(vrfRule.CommunityList) > 0 {
+				fmt.Printf("  Communities:      %s\n", vrfRule.CommunityList[0])
+				for _, comm := range vrfRule.CommunityList[1:] {
+					fmt.Printf("                    %s\n", comm)
+				}
+			}
+
+			if len(vrfRule.LargeCommunityList) > 0 {
+				fmt.Printf("  Large Communities: %s\n", vrfRule.LargeCommunityList[0])
+				for _, lcomm := range vrfRule.LargeCommunityList[1:] {
+					fmt.Printf("                     %s\n", lcomm)
+				}
+			}
+
+			if len(vrfRule.CommunityList) == 0 && len(vrfRule.LargeCommunityList) == 0 {
+				fmt.Printf("  Communities:      (match all routes)\n")
+			}
+
+			fmt.Println()
+		}
+	}
+
 	return nil
 }
 

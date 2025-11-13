@@ -643,7 +643,17 @@ message ListNetlinkExportRulesResponse {
 		uint32 metric = 6;
 		bool validate_nexthop = 7;
 	}
+	message VrfExportRule {
+		string gobgp_vrf = 1;              // GoBGP VRF name
+		string linux_vrf = 2;              // Target Linux VRF name
+		int32 linux_table_id = 3;          // Target Linux table ID
+		uint32 metric = 4;
+		bool validate_nexthop = 5;
+		repeated string community_list = 6;
+		repeated string large_community_list = 7;
+	}
 	repeated ExportRule rules = 1;
+	repeated VrfExportRule vrf_rules = 2;
 }
 
 message GetNetlinkImportStatsRequest {}

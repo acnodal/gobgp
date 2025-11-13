@@ -12,6 +12,7 @@ This is useful for scenarios where you want to advertise the host's own network 
 2. [Netlink Export](#netlink-export)
 3. [CLI Commands](#cli-commands)
 4. [gRPC API](#grpc-api)
+5. [Development](#development)
 
 ---
 
@@ -70,13 +71,68 @@ Netlink import allows GoBGP to discover routes from Linux network interfaces and
   interface-list = ["vlan*", "eth*"]
 ```
 
-#### Example 3: Import into VRF
+#### Example 3: Import into Global VRF
 
 ```toml
 [netlink.import]
   enabled = true
   vrf = "customer-a"
   interface-list = ["eth2", "eth3"]
+```
+
+#### Example 4: Per-VRF Import Configuration
+
+**Important**: You can configure netlink import on a per-VRF basis using the VRF's `netlink-import` section. This is in addition to (or instead of) the global `[netlink.import]` configuration.
+
+```toml
+# Define the VRF
+[[vrfs]]
+  [vrfs.config]
+    name = "kubevrf"
+    rd = "64553:175"
+    import-rt-list = ["64553:175"]
+    export-rt-list = ["64553:175"]
+
+  # Configure netlink import for this specific VRF
+  [vrfs.netlink-import]
+    enabled = true
+    interface-list = ["eth2", "eth3"]  # Interfaces enslaved to this VRF
+```
+
+**Note**: The VRF must be defined in Linux (using `ip link add ... type vrf`) and the interfaces must be enslaved to that VRF (`ip link set ... master vrf-name`).
+
+#### Example 5: Multiple VRF Imports
+
+You can configure import for both global and multiple VRFs simultaneously:
+
+```toml
+# Global import
+[netlink.import]
+  enabled = true
+  interface-list = ["eth0", "eth1"]
+
+# VRF-specific imports
+[[vrfs]]
+  [vrfs.config]
+    name = "customer-a"
+    rd = "65000:100"
+    import-rt-list = ["65000:100"]
+    export-rt-list = ["65000:100"]
+
+  [vrfs.netlink-import]
+    enabled = true
+    interface-list = ["eth2"]
+
+[[vrfs]]
+  [vrfs.config]
+    name = "customer-b"
+    rd = "65000:200"
+    import-rt-list = ["65000:200"]
+    export-rt-list = ["65000:200"]
+
+  [vrfs.netlink-import]
+    enabled = true
+    interface-list = ["eth3"]
 ```
 
 ## How Import Works
@@ -149,8 +205,10 @@ The netlink export feature allows GoBGP to export BGP routes from the RIB to the
 
 - **Community-based filtering**: Export routes based on BGP standard communities (32-bit) and large communities (96-bit)
 - **VRF support**: Export routes to specific Linux routing tables associated with VRFs
+- **Per-VRF export**: Automatic GoBGP VRF to Linux VRF mapping with optional community filtering
 - **Multiple export rules**: Define multiple rules with different communities, tables, and metrics
 - **Nexthop validation**: Verify nexthop reachability before exporting (enabled by default)
+- **VPN family support**: Automatically handles VPN family paths (RF_IPv4_VPN, RF_IPv6_VPN) for VRF routes
 - **Route dampening**: Prevent flapping storms with configurable dampening interval (default: 100ms)
 - **Automatic withdrawal**: Routes are automatically removed from Linux when withdrawn from BGP
 - **Startup cleanup**: Stale routes from previous runs are cleaned up on startup
@@ -203,6 +261,30 @@ The netlink export feature allows GoBGP to export BGP routes from the RIB to the
 | `validate-nexthop` | bool | true | Validate nexthop reachability before exporting |
 
 **Note**: If neither `community-list` nor `large-community-list` is specified, the rule matches ALL routes.
+
+#### Per-VRF Export Parameters
+
+Configure export within a VRF definition using `[vrfs.netlink-export]`:
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `enabled` | boolean | Yes | false | Enable VRF-to-VRF export |
+| `linux-vrf` | string | No | (same as GoBGP VRF) | Target Linux VRF name |
+| `linux-table-id` | int | No | (auto-lookup) | Target Linux routing table ID |
+| `metric` | uint32 | Yes | - | Route metric/priority in Linux |
+| `validate-nexthop` | bool | No | true | Validate nexthop reachability |
+| `community-list` | []string | No | [] | Filter by standard communities (empty = all routes) |
+| `large-community-list` | []string | No | [] | Filter by large communities |
+
+**Default Behavior:**
+- `linux-vrf` defaults to the GoBGP VRF name (automatic name-based mapping)
+- `linux-table-id` is automatically looked up from the Linux VRF if not specified
+- If no community lists are specified, ALL routes in the VRF are exported
+
+**Interaction with Global Rules:**
+- Routes can match both per-VRF export AND global export rules
+- A single route can be exported to multiple Linux VRF tables
+- Both export mechanisms operate independently
 
 ### Community Formats
 
@@ -327,6 +409,110 @@ Configure a different route protocol to coexist with Zebra/FRR:
     community-list = ["65000:100"]
     metric = 30  # Higher metric than Zebra routes
 ```
+
+### Example 7: Per-VRF Export (Auto-Mapping)
+
+Export all routes from a GoBGP VRF to the Linux VRF with the same name:
+
+```toml
+[[vrfs]]
+  [vrfs.config]
+    name = "kubevrf"
+    rd = "64553:175"
+    import-rt-list = ["64553:175"]
+    export-rt-list = ["64553:175"]
+
+  # Enable VRF-to-VRF export
+  [vrfs.netlink-export]
+    enabled = true
+    metric = 20
+    # linux-vrf defaults to "kubevrf" (same as GoBGP VRF name)
+    # linux-table-id auto-looked-up from Linux VRF (table 175)
+```
+
+**What this does:**
+- All routes in GoBGP VRF "kubevrf" are exported to Linux VRF "kubevrf" table 175
+- No community filtering - all routes are exported
+- Table ID is automatically discovered from the Linux VRF configuration
+
+### Example 8: Per-VRF Export with Community Filtering
+
+Export only specific routes from a VRF:
+
+```toml
+[[vrfs]]
+  [vrfs.config]
+    name = "customer-a"
+    rd = "65000:100"
+    import-rt-list = ["65000:100"]
+    export-rt-list = ["65000:100"]
+
+  [vrfs.netlink-export]
+    enabled = true
+    community-list = ["65000:100", "65000:101"]
+    metric = 20
+```
+
+**What this does:**
+- Only routes in VRF "customer-a" with communities 65000:100 OR 65000:101 are exported
+- Exported to Linux VRF "customer-a" (auto-mapped)
+
+### Example 9: Cross-VRF Export
+
+Export routes from one GoBGP VRF to a different Linux VRF:
+
+```toml
+[[vrfs]]
+  [vrfs.config]
+    name = "gobgp-vrf-a"
+    rd = "65000:100"
+    import-rt-list = ["65000:100"]
+    export-rt-list = ["65000:100"]
+
+  [vrfs.netlink-export]
+    enabled = true
+    linux-vrf = "linux-vrf-b"     # Export to different Linux VRF
+    linux-table-id = 200           # Explicit table ID
+    metric = 20
+```
+
+**What this does:**
+- Routes from GoBGP VRF "gobgp-vrf-a" are exported to Linux VRF "linux-vrf-b" table 200
+- Useful for cross-VRF route leaking scenarios
+
+### Example 10: Combined Global and Per-VRF Export
+
+Use both global export rules and per-VRF export simultaneously:
+
+```toml
+# Global export rules
+[netlink.export]
+  enabled = true
+
+  [[netlink.export.rules]]
+    name = "shared-services"
+    community-list = ["65000:999"]
+    vrf = "shared"
+    table-id = 300
+    metric = 10
+
+# Per-VRF export
+[[vrfs]]
+  [vrfs.config]
+    name = "kubevrf"
+    rd = "64553:175"
+    import-rt-list = ["64553:175"]
+    export-rt-list = ["64553:175"]
+
+  [vrfs.netlink-export]
+    enabled = true
+    metric = 20
+```
+
+**What this does:**
+- All routes in "kubevrf" are exported to Linux VRF "kubevrf" (via per-VRF export)
+- Routes with community 65000:999 are ALSO exported to Linux VRF "shared" table 300 (via global rule)
+- A single route can appear in multiple Linux VRF tables
 
 ## Architecture
 
@@ -538,6 +724,8 @@ Prefix                                   Nexthop              VRF              T
 gobgp netlink export rules
 ```
 
+Shows both global export rules and per-VRF export rules.
+
 **Example output:**
 ```
 Rule: export-customer-a
@@ -554,7 +742,24 @@ Rule: export-customer-b
   Metric:           20
   Validate Nexthop: true
   Communities:      65000:200
+
+Per-VRF Export Rules:
+
+VRF: kubevrf → Linux VRF: kubevrf
+  Linux Table ID:   175
+  Metric:           20
+  Validate Nexthop: true
+  Communities:      (match all routes)
+
+VRF: customer-a → Linux VRF: customer-a
+  Linux Table ID:   100
+  Metric:           20
+  Validate Nexthop: true
+  Communities:      65000:100
+                    65000:101
 ```
+
+**Note**: Per-VRF export rules (configured via `[[vrfs]].netlink-export`) are shown separately from global export rules.
 
 ### View Export Statistics
 
@@ -802,6 +1007,60 @@ gobgp netlink import stats
 journalctl -u gobgpd -f | grep netlink
 ```
 
+### "VRF not found" Error
+
+If you see errors like `"Error": "vrf kubevrf not found"` in the logs:
+
+**Problem**: The VRF exists in Linux but is not defined in GoBGP's configuration.
+
+**Solution**: Add the VRF to your GoBGP configuration:
+
+```toml
+[[vrfs]]
+  [vrfs.config]
+    name = "kubevrf"  # Must match the Linux VRF name
+    rd = "64553:175"   # Route distinguisher (ASN:table-id or similar)
+    import-rt-list = ["64553:175"]
+    export-rt-list = ["64553:175"]
+```
+
+**Important**:
+- The VRF `name` must exactly match the Linux VRF name shown in `ip vrf show`
+- The VRF must be defined in GoBGP before netlink import can add routes to it
+- Use `[vrfs.netlink-import]` for per-VRF import, or `[netlink.import]` with `vrf = "vrf-name"` for global import
+
+**Verify VRF exists in Linux:**
+```bash
+ip vrf show
+# Should show your VRF and its table ID
+```
+
+**Verify VRF is configured in GoBGP:**
+```bash
+gobgp vrf
+# Should list your VRF
+```
+
+### Wrong Interface in interface-list
+
+**Problem**: Using the VRF device name (e.g., "kubevrf") instead of actual interfaces.
+
+**Solution**: List the actual interfaces enslaved to the VRF:
+
+```bash
+# Find interfaces in the VRF
+ip link show master kubevrf
+```
+
+Then configure with the actual interface names:
+
+```toml
+[netlink.import]
+  enabled = true
+  vrf = "kubevrf"
+  interface-list = ["eth1", "eth2"]  # Actual interfaces, NOT "kubevrf"
+```
+
 ## Export Issues
 
 ### Routes Not Appearing in Linux
@@ -1024,3 +1283,89 @@ A: Not directly. Use BGP policies to tag routes from specific peers with communi
 
 **Q: What happens during config reload?**
 A: On SIGHUP, GoBGP re-evaluates all routes against new rules. Routes are added/removed/updated as needed.
+
+---
+
+# Development
+
+## Regenerating Protocol Buffer Files
+
+If you modify the gRPC API definitions in `proto/api/gobgp.proto` or other proto files, you need to regenerate the Protocol Buffer files.
+
+### Quick Method
+
+Use the provided script:
+
+```bash
+./tools/generate-proto.sh
+```
+
+This script:
+- Checks for required tools (`protoc`, `protoc-gen-go`, `protoc-gen-go-grpc`)
+- Automatically installs missing Go plugins
+- Generates all `.pb.go` and `_grpc.pb.go` files with correct paths
+- Shows clear success/error messages
+
+### Requirements
+
+**Protocol Buffer Compiler (`protoc`):**
+```bash
+# Debian/Ubuntu
+sudo apt-get install protobuf-compiler
+
+# macOS
+brew install protobuf
+
+# Or download from:
+# https://github.com/protocolbuffers/protobuf/releases
+```
+
+**Go Plugins** (auto-installed by script):
+- `protoc-gen-go`
+- `protoc-gen-go-grpc`
+
+### Manual Method
+
+If you need to regenerate manually:
+
+```bash
+cd /path/to/gobgp
+
+# Ensure Go plugin tools are in PATH
+export PATH="$GOPATH/bin:$PATH"
+
+# Generate
+protoc \
+  --proto_path=proto \
+  --go_out=. \
+  --go_opt=paths=source_relative \
+  --go-grpc_out=. \
+  --go-grpc_opt=paths=source_relative \
+  proto/api/*.proto
+```
+
+### After Regeneration
+
+Rebuild the binaries:
+
+```bash
+go build -o gobgpd ./cmd/gobgpd
+go build -o gobgp ./cmd/gobgp
+```
+
+### Troubleshooting
+
+**"protoc not found":**
+Install the protobuf compiler (see Requirements above)
+
+**"protoc-gen-go: program not found":**
+```bash
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+export PATH="$GOPATH/bin:$PATH"
+```
+
+**Import errors during generation:**
+Make sure you're running from the project root directory and using `--proto_path=proto`
+
+For more details, see [tools/README.md](../../tools/README.md).

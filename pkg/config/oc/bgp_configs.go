@@ -1316,6 +1316,18 @@ type NetlinkExportRule struct {
 	ValidateNexthop    *bool    `mapstructure:"validate-nexthop" json:"validate-nexthop,omitempty"` // pointer to distinguish unset from false
 }
 
+// struct for container gobgp:vrf-netlink-export.
+// Per-VRF netlink export configuration for automatic VRF-to-VRF mapping.
+type VrfNetlinkExport struct {
+	Enabled            bool     `mapstructure:"enabled" json:"enabled,omitempty"`
+	LinuxVrf           string   `mapstructure:"linux-vrf" json:"linux-vrf,omitempty"`                       // Target Linux VRF name (default: same as GoBGP VRF name)
+	LinuxTableId       int      `mapstructure:"linux-table-id" json:"linux-table-id,omitempty"`             // Target Linux table ID (default: auto-lookup from Linux VRF)
+	Metric             uint32   `mapstructure:"metric" json:"metric,omitempty"`
+	ValidateNexthop    *bool    `mapstructure:"validate-nexthop" json:"validate-nexthop,omitempty"`         // pointer to distinguish unset from false
+	CommunityList      []string `mapstructure:"community-list" json:"community-list,omitempty"`             // Optional community filter (empty = export all)
+	LargeCommunityList []string `mapstructure:"large-community-list" json:"large-community-list,omitempty"` // Optional large community filter
+}
+
 func (lhs *NetlinkImport) Equal(rhs *NetlinkImport) bool {
 	if lhs == nil || rhs == nil {
 		return false
@@ -1372,6 +1384,50 @@ func (lhs *NetlinkExportRule) Equal(rhs *NetlinkExportRule) bool {
 		return false
 	}
 	if lhs.TableId != rhs.TableId {
+		return false
+	}
+	if lhs.Metric != rhs.Metric {
+		return false
+	}
+	// Compare ValidateNexthop (pointer comparison)
+	if (lhs.ValidateNexthop == nil) != (rhs.ValidateNexthop == nil) {
+		return false
+	}
+	if lhs.ValidateNexthop != nil && *lhs.ValidateNexthop != *rhs.ValidateNexthop {
+		return false
+	}
+	// Compare community lists
+	if len(lhs.CommunityList) != len(rhs.CommunityList) {
+		return false
+	}
+	for idx, l := range lhs.CommunityList {
+		if l != rhs.CommunityList[idx] {
+			return false
+		}
+	}
+	// Compare large community lists
+	if len(lhs.LargeCommunityList) != len(rhs.LargeCommunityList) {
+		return false
+	}
+	for idx, l := range lhs.LargeCommunityList {
+		if l != rhs.LargeCommunityList[idx] {
+			return false
+		}
+	}
+	return true
+}
+
+func (lhs *VrfNetlinkExport) Equal(rhs *VrfNetlinkExport) bool {
+	if lhs == nil || rhs == nil {
+		return false
+	}
+	if lhs.Enabled != rhs.Enabled {
+		return false
+	}
+	if lhs.LinuxVrf != rhs.LinuxVrf {
+		return false
+	}
+	if lhs.LinuxTableId != rhs.LinuxTableId {
 		return false
 	}
 	if lhs.Metric != rhs.Metric {
@@ -1575,6 +1631,9 @@ type Vrf struct {
 	// original -> gobgp:netlink-import
 	// Netlink import configuration for this VRF.
 	NetlinkImport NetlinkImport `mapstructure:"netlink-import" json:"netlink-import,omitempty"`
+	// original -> gobgp:netlink-export
+	// Netlink export configuration for this VRF.
+	NetlinkExport VrfNetlinkExport `mapstructure:"netlink-export" json:"netlink-export,omitempty"`
 }
 
 func (lhs *Vrf) Equal(rhs *Vrf) bool {
@@ -1582,6 +1641,12 @@ func (lhs *Vrf) Equal(rhs *Vrf) bool {
 		return false
 	}
 	if !lhs.Config.Equal(&(rhs.Config)) {
+		return false
+	}
+	if !lhs.NetlinkImport.Equal(&(rhs.NetlinkImport)) {
+		return false
+	}
+	if !lhs.NetlinkExport.Equal(&(rhs.NetlinkExport)) {
 		return false
 	}
 	return true

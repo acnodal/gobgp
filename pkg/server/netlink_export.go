@@ -78,6 +78,17 @@ type exportStats struct {
 	LastErrorMsg      string    // Last error message
 }
 
+// vrfExportConfig holds per-VRF export configuration
+type vrfExportConfig struct {
+	VrfName            string   // GoBGP VRF name
+	LinuxVrf           string   // Target Linux VRF name (default: same as VrfName)
+	LinuxTableId       int      // Target Linux table ID (0 = auto-lookup)
+	Metric             uint32   // Route metric
+	ValidateNexthop    bool     // Validate nexthop reachability
+	CommunityList      []uint32 // Standard communities (parsed)
+	LargeCommunityList []*bgp.LargeCommunity // Large communities (parsed)
+}
+
 // netlinkExportClient manages exporting BGP routes to Linux routing tables
 type netlinkExportClient struct {
 	client   *go_netlink.Handle
@@ -86,6 +97,10 @@ type netlinkExportClient struct {
 	rules    []*exportRule
 	exported map[string]map[string]*exportedRouteInfo // vrf -> prefix -> info
 	mu       sync.RWMutex
+
+	// VRF export mapping
+	rdToVrf  map[string]string // RD string -> VRF name
+	vrfRules map[string]*vrfExportConfig // VRF name -> export config
 
 	// Dampening
 	dampeningInterval time.Duration
@@ -125,6 +140,8 @@ func newNetlinkExportClient(server *BgpServer, logger log.Logger, routeProtocol 
 		logger:            logger,
 		rules:             make([]*exportRule, 0),
 		exported:          make(map[string]map[string]*exportedRouteInfo),
+		rdToVrf:           make(map[string]string),
+		vrfRules:          make(map[string]*vrfExportConfig),
 		pendingUpdates:    make(map[string]*dampenEntry),
 		routeProtocol:     routeProtocol,
 		dampeningInterval: dampeningInterval,
@@ -202,6 +219,134 @@ func (e *netlinkExportClient) setRules(rules []*exportRule) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.rules = rules
+}
+
+// buildVrfMappings builds RD-to-VRF mapping and VRF export rules from server config
+func (e *netlinkExportClient) buildVrfMappings() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Clear existing mappings
+	e.rdToVrf = make(map[string]string)
+	e.vrfRules = make(map[string]*vrfExportConfig)
+
+	// Build mappings from server VRF configuration
+	for _, vrf := range e.server.bgpConfig.Vrfs {
+		// Map RD to VRF name
+		if vrf.Config.Rd != "" {
+			e.rdToVrf[vrf.Config.Rd] = vrf.Config.Name
+		}
+
+		// Check if this VRF has netlink-export enabled
+		if !vrf.NetlinkExport.Enabled {
+			continue
+		}
+
+		// Build VRF export config
+		vrfExport := &vrfExportConfig{
+			VrfName:      vrf.Config.Name,
+			LinuxVrf:     vrf.NetlinkExport.LinuxVrf,
+			LinuxTableId: vrf.NetlinkExport.LinuxTableId,
+			Metric:       vrf.NetlinkExport.Metric,
+		}
+
+		// Default LinuxVrf to GoBGP VRF name if not specified
+		if vrfExport.LinuxVrf == "" {
+			vrfExport.LinuxVrf = vrf.Config.Name
+		}
+
+		// Set ValidateNexthop (default: true)
+		if vrf.NetlinkExport.ValidateNexthop != nil {
+			vrfExport.ValidateNexthop = *vrf.NetlinkExport.ValidateNexthop
+		} else {
+			vrfExport.ValidateNexthop = true
+		}
+
+		// Parse communities
+		vrfExport.CommunityList = make([]uint32, 0, len(vrf.NetlinkExport.CommunityList))
+		for _, commStr := range vrf.NetlinkExport.CommunityList {
+			comm, err := table.ParseCommunity(commStr)
+			if err != nil {
+				e.logger.Warn("Failed to parse community in VRF export config",
+					log.Fields{
+						"Topic":     "netlink",
+						"VRF":       vrf.Config.Name,
+						"Community": commStr,
+						"Error":     err,
+					})
+				continue
+			}
+			vrfExport.CommunityList = append(vrfExport.CommunityList, comm)
+		}
+
+		// Parse large communities
+		vrfExport.LargeCommunityList = make([]*bgp.LargeCommunity, 0, len(vrf.NetlinkExport.LargeCommunityList))
+		for _, lcommStr := range vrf.NetlinkExport.LargeCommunityList {
+			lcomm, err := bgp.ParseLargeCommunity(lcommStr)
+			if err != nil {
+				e.logger.Warn("Failed to parse large community in VRF export config",
+					log.Fields{
+						"Topic":          "netlink",
+						"VRF":            vrf.Config.Name,
+						"LargeCommunity": lcommStr,
+						"Error":          err,
+					})
+				continue
+			}
+			vrfExport.LargeCommunityList = append(vrfExport.LargeCommunityList, lcomm)
+		}
+
+		// Lookup Linux table ID if not specified
+		if vrfExport.LinuxTableId == 0 {
+			tableId, err := e.lookupLinuxVrfTableId(vrfExport.LinuxVrf)
+			if err != nil {
+				e.logger.Warn("Failed to lookup Linux VRF table ID, will use main table",
+					log.Fields{
+						"Topic":    "netlink",
+						"VRF":      vrf.Config.Name,
+						"LinuxVRF": vrfExport.LinuxVrf,
+						"Error":    err,
+					})
+			} else {
+				vrfExport.LinuxTableId = tableId
+			}
+		}
+
+		e.vrfRules[vrf.Config.Name] = vrfExport
+
+		e.logger.Info("Configured VRF export",
+			log.Fields{
+				"Topic":       "netlink",
+				"VRF":         vrf.Config.Name,
+				"LinuxVRF":    vrfExport.LinuxVrf,
+				"LinuxTable":  vrfExport.LinuxTableId,
+				"Metric":      vrfExport.Metric,
+			})
+	}
+
+	return nil
+}
+
+// lookupLinuxVrfTableId looks up the Linux routing table ID for a VRF name
+func (e *netlinkExportClient) lookupLinuxVrfTableId(vrfName string) (int, error) {
+	// Get all links
+	links, err := e.client.LinkList()
+	if err != nil {
+		return 0, fmt.Errorf("failed to list links: %w", err)
+	}
+
+	// Find the VRF link
+	for _, link := range links {
+		if link.Type() == "vrf" && link.Attrs().Name == vrfName {
+			// VRF found - get its table ID
+			// The table ID is stored in the link's Attrs
+			if vrfLink, ok := link.(*go_netlink.Vrf); ok {
+				return int(vrfLink.Table), nil
+			}
+		}
+	}
+
+	return 0, fmt.Errorf("VRF %s not found in Linux", vrfName)
 }
 
 // reEvaluateAllRoutes re-evaluates all routes in the RIB against new rules
@@ -402,9 +547,29 @@ func (e *netlinkExportClient) isNexthopReachable(nh net.IP, tableId int) bool {
 
 // exportRoute exports a BGP path to the Linux routing table according to a rule
 func (e *netlinkExportClient) exportRoute(path *table.Path, rule *exportRule) error {
-	// Get prefix
+	// Get prefix - handle both regular and VPN families
 	nlri := path.GetNlri()
-	prefix := nlri.String()
+	var prefix string
+	family := path.GetFamily()
+
+	if family == bgp.RF_IPv4_VPN || family == bgp.RF_IPv6_VPN {
+		// VPN family - extract plain prefix without RD
+		if vpnNlri, ok := nlri.(*bgp.LabeledVPNIPAddrPrefix); ok {
+			prefix = vpnNlri.IPPrefix() // Returns "10.0.0.0/24" without RD
+			e.logger.Debug("Processing VPN family path",
+				log.Fields{
+					"Topic":  "netlink",
+					"Prefix": prefix,
+					"RD":     vpnNlri.RD.String(),
+					"Family": family.String(),
+				})
+		} else {
+			return fmt.Errorf("unexpected VPN NLRI type for family %s", family.String())
+		}
+	} else {
+		// Regular unicast family
+		prefix = nlri.String()
+	}
 
 	// Get nexthop
 	nexthop := path.GetNexthop()
@@ -688,7 +853,7 @@ func (e *netlinkExportClient) processUpdate(path *table.Path) {
 		return
 	}
 
-	// Check all rules to see if this path should be exported
+	// Check all global export rules
 	e.mu.RLock()
 	rules := make([]*exportRule, len(e.rules))
 	copy(rules, e.rules)
@@ -699,6 +864,97 @@ func (e *netlinkExportClient) processUpdate(path *table.Path) {
 			e.exportRoute(path, rule)
 		}
 	}
+
+	// Check per-VRF export rules for VPN family paths
+	family := path.GetFamily()
+	if family == bgp.RF_IPv4_VPN || family == bgp.RF_IPv6_VPN {
+		e.processVrfExport(path)
+	}
+}
+
+// processVrfExport handles per-VRF export for VPN family paths
+func (e *netlinkExportClient) processVrfExport(path *table.Path) {
+	// Extract RD and prefix from VPN NLRI
+	nlri := path.GetNlri()
+	vpnNlri, ok := nlri.(*bgp.LabeledVPNIPAddrPrefix)
+	if !ok {
+		return
+	}
+
+	rd := vpnNlri.RD.String()
+
+	// Lookup VRF name from RD
+	e.mu.RLock()
+	vrfName, vrfExists := e.rdToVrf[rd]
+	if !vrfExists {
+		e.mu.RUnlock()
+		return
+	}
+
+	// Get VRF export config
+	vrfExport, exportEnabled := e.vrfRules[vrfName]
+	e.mu.RUnlock()
+
+	if !exportEnabled {
+		return
+	}
+
+	// Check if route matches VRF export filters (if any)
+	if !e.matchesVrfExportFilters(path, vrfExport) {
+		return
+	}
+
+	// Create an export rule from VRF config and export the route
+	rule := &exportRule{
+		Name:            vrfName + "-vrf-export",
+		VrfName:         vrfExport.LinuxVrf,
+		TableId:         vrfExport.LinuxTableId,
+		Metric:          vrfExport.Metric,
+		ValidateNexthop: vrfExport.ValidateNexthop,
+	}
+
+	e.exportRoute(path, rule)
+}
+
+// matchesVrfExportFilters checks if a path matches VRF export community filters
+func (e *netlinkExportClient) matchesVrfExportFilters(path *table.Path, vrfExport *vrfExportConfig) bool {
+	// If no community filters specified, match all routes
+	if len(vrfExport.CommunityList) == 0 && len(vrfExport.LargeCommunityList) == 0 {
+		return true
+	}
+
+	// Get path communities
+	pathComms := path.GetCommunities()
+	pathCommSet := make(map[uint32]bool)
+	for _, comm := range pathComms {
+		pathCommSet[comm] = true
+	}
+
+	// Check standard communities (OR logic)
+	for _, ruleComm := range vrfExport.CommunityList {
+		if pathCommSet[ruleComm] {
+			return true
+		}
+	}
+
+	// Get large communities
+	pathLargeComms := make(map[string]bool)
+	for _, attr := range path.GetPathAttrs() {
+		if lcomms, ok := attr.(*bgp.PathAttributeLargeCommunities); ok {
+			for _, lc := range lcomms.Values {
+				pathLargeComms[lc.String()] = true
+			}
+		}
+	}
+
+	// Check large communities (OR logic)
+	for _, ruleLComm := range vrfExport.LargeCommunityList {
+		if pathLargeComms[ruleLComm.String()] {
+			return true
+		}
+	}
+
+	return false
 }
 
 // getStats returns current export statistics
@@ -751,6 +1007,32 @@ func (e *netlinkExportClient) getRules() []*exportRule {
 			ruleCopy.LargeCommunities[j] = lcomm
 		}
 		result[i] = ruleCopy
+	}
+	return result
+}
+
+// getVrfRules returns a copy of the VRF export rules
+func (e *netlinkExportClient) getVrfRules() map[string]*vrfExportConfig {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	// Deep copy to avoid race conditions
+	result := make(map[string]*vrfExportConfig, len(e.vrfRules))
+	for vrfName, rule := range e.vrfRules {
+		ruleCopy := &vrfExportConfig{
+			VrfName:            rule.VrfName,
+			LinuxVrf:           rule.LinuxVrf,
+			LinuxTableId:       rule.LinuxTableId,
+			Metric:             rule.Metric,
+			ValidateNexthop:    rule.ValidateNexthop,
+			CommunityList:      make([]uint32, len(rule.CommunityList)),
+			LargeCommunityList: make([]*bgp.LargeCommunity, len(rule.LargeCommunityList)),
+		}
+		copy(ruleCopy.CommunityList, rule.CommunityList)
+		for i, lcomm := range rule.LargeCommunityList {
+			ruleCopy.LargeCommunityList[i] = lcomm
+		}
+		result[vrfName] = ruleCopy
 	}
 	return result
 }

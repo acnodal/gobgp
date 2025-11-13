@@ -2128,6 +2128,15 @@ func (s *BgpServer) StartNetlink(ctx context.Context) error {
 				"RuleCount": len(rules),
 			})
 
+		// Build VRF-to-VRF export mappings
+		if err := s.netlinkExportClient.buildVrfMappings(); err != nil {
+			s.logger.Warn("Failed to build VRF export mappings",
+				log.Fields{
+					"Topic": "netlink",
+					"Error": err,
+				})
+		}
+
 		// Re-evaluate all existing RIB routes with the new rules
 		// This ensures routes are exported/withdrawn based on the updated configuration
 		if s.globalRib != nil {
@@ -2254,7 +2263,39 @@ func (s *BgpServer) ListNetlinkExportRules(ctx context.Context, req *api.ListNet
 		apiRules = append(apiRules, apiRule)
 	}
 
-	return &api.ListNetlinkExportRulesResponse{Rules: apiRules}, nil
+	// Get VRF export rules
+	vrfRules := s.netlinkExportClient.getVrfRules()
+	apiVrfRules := make([]*api.ListNetlinkExportRulesResponse_VrfExportRule, 0, len(vrfRules))
+
+	for _, vrfRule := range vrfRules {
+		// Convert standard communities to strings (AS:Value format)
+		communityList := make([]string, 0, len(vrfRule.CommunityList))
+		for _, comm := range vrfRule.CommunityList {
+			communityList = append(communityList, fmt.Sprintf("%d:%d", comm>>16, comm&0xFFFF))
+		}
+
+		// Convert large communities to strings
+		largeCommunityList := make([]string, 0, len(vrfRule.LargeCommunityList))
+		for _, lcomm := range vrfRule.LargeCommunityList {
+			largeCommunityList = append(largeCommunityList, lcomm.String())
+		}
+
+		apiVrfRule := &api.ListNetlinkExportRulesResponse_VrfExportRule{
+			GobgpVrf:           vrfRule.VrfName,
+			LinuxVrf:           vrfRule.LinuxVrf,
+			LinuxTableId:       int32(vrfRule.LinuxTableId),
+			Metric:             vrfRule.Metric,
+			ValidateNexthop:    vrfRule.ValidateNexthop,
+			CommunityList:      communityList,
+			LargeCommunityList: largeCommunityList,
+		}
+		apiVrfRules = append(apiVrfRules, apiVrfRule)
+	}
+
+	return &api.ListNetlinkExportRulesResponse{
+		Rules:    apiRules,
+		VrfRules: apiVrfRules,
+	}, nil
 }
 
 func (s *BgpServer) AddBmp(ctx context.Context, r *api.AddBmpRequest) error {
