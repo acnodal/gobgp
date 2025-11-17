@@ -44,8 +44,19 @@ func showNetlink() error {
 		fmt.Printf("  VRF:        %s\n", vrfDisplay)
 		fmt.Printf("  Interfaces: %s\n", res.Interfaces)
 	}
-	fmt.Println()
 
+	// Display VRF import configurations
+	if len(res.VrfImports) > 0 {
+		fmt.Println()
+		fmt.Println("VRF Imports:")
+		for _, vrfImport := range res.VrfImports {
+			fmt.Printf("  VRF:        %s\n", vrfImport.VrfName)
+			fmt.Printf("  Interfaces: %v\n", vrfImport.Interfaces)
+			fmt.Println()
+		}
+	}
+
+	fmt.Println()
 	fmt.Printf("Export: %t\n", res.ExportEnabled)
 	if res.ExportEnabled {
 		fmt.Printf("  (use 'gobgp netlink export rules' to see export configuration)\n")
@@ -60,22 +71,38 @@ func showNetlinkImport() error {
 		return err
 	}
 
-	if !res.ImportEnabled {
+	hasImport := res.ImportEnabled || len(res.VrfImports) > 0
+
+	if !hasImport {
 		fmt.Println("Netlink import is not enabled")
 		return nil
 	}
 
-	vrfDisplay := res.Vrf
-	if vrfDisplay == "" {
-		vrfDisplay = "global"
+	fmt.Println("Netlink Import Configuration:")
+	fmt.Println()
+
+	if res.ImportEnabled {
+		vrfDisplay := res.Vrf
+		if vrfDisplay == "" {
+			vrfDisplay = "global"
+		}
+		fmt.Printf("Global Import:\n")
+		fmt.Printf("  VRF:        %s\n", vrfDisplay)
+		fmt.Printf("  Interfaces: %v\n", res.Interfaces)
+		fmt.Println()
 	}
 
-	fmt.Println("Netlink Import Configuration:")
-	fmt.Printf("  VRF:        %s\n", vrfDisplay)
-	fmt.Printf("  Interfaces: %s\n", res.Interfaces)
-	fmt.Println()
-	fmt.Println("Note: Imported routes are visible in the global RIB")
-	fmt.Println("      Use 'gobgp global rib' to view imported routes")
+	if len(res.VrfImports) > 0 {
+		fmt.Println("VRF Imports:")
+		for _, vrfImport := range res.VrfImports {
+			fmt.Printf("  VRF:        %s\n", vrfImport.VrfName)
+			fmt.Printf("  Interfaces: %v\n", vrfImport.Interfaces)
+			fmt.Println()
+		}
+	}
+
+	fmt.Println("Note: Imported routes are visible in the RIB")
+	fmt.Println("      Use 'gobgp global rib' or 'gobgp vrf <name> rib' to view imported routes")
 
 	return nil
 }

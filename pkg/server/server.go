@@ -2344,11 +2344,24 @@ func (s *BgpServer) DeleteBmp(ctx context.Context, r *api.DeleteBmpRequest) erro
 }
 
 func (s *BgpServer) GetNetlink(ctx context.Context, in *api.GetNetlinkRequest) (*api.GetNetlinkResponse, error) {
+	// Collect VRF import configurations
+	vrfImports := make([]*api.NetlinkVrfImport, 0)
+	for i := range s.bgpConfig.Vrfs {
+		vrf := &s.bgpConfig.Vrfs[i]
+		if vrf.NetlinkImport.Enabled {
+			vrfImports = append(vrfImports, &api.NetlinkVrfImport{
+				VrfName:    vrf.Config.Name,
+				Interfaces: vrf.NetlinkImport.InterfaceList,
+			})
+		}
+	}
+
 	return &api.GetNetlinkResponse{
 		ImportEnabled: s.bgpConfig.Netlink.Import.Enabled,
 		ExportEnabled: s.bgpConfig.Netlink.Export.Enabled,
 		Vrf:           s.bgpConfig.Netlink.Import.Vrf,
 		Interfaces:    s.bgpConfig.Netlink.Import.InterfaceList,
+		VrfImports:    vrfImports,
 	}, nil
 }
 
@@ -3000,6 +3013,24 @@ func (s *BgpServer) AddVrf(ctx context.Context, r *api.AddVrfRequest) error {
 				}
 			}
 		}
+
+		// Trigger netlink import rescan for newly added VRF
+		if s.netlinkClient != nil {
+			s.netlinkClient.rescan()
+		}
+
+		// Rebuild VRF export mappings for newly added VRF
+		if s.netlinkExportClient != nil {
+			if err := s.netlinkExportClient.buildVrfMappings(); err != nil {
+				s.logger.Warn("Failed to rebuild VRF export mappings after VRF add",
+					log.Fields{
+						"Topic": "netlink",
+						"VRF":   name,
+						"Error": err,
+					})
+			}
+		}
+
 		return nil
 	}, true)
 }

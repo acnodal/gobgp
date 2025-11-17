@@ -316,11 +316,12 @@ func (e *netlinkExportClient) buildVrfMappings() error {
 
 		e.logger.Info("Configured VRF export",
 			log.Fields{
-				"Topic":       "netlink",
-				"VRF":         vrf.Config.Name,
-				"LinuxVRF":    vrfExport.LinuxVrf,
-				"LinuxTable":  vrfExport.LinuxTableId,
-				"Metric":      vrfExport.Metric,
+				"Topic":          "netlink",
+				"VRF":            vrf.Config.Name,
+				"LinuxVRF":       vrfExport.LinuxVrf,
+				"LinuxTable":     vrfExport.LinuxTableId,
+				"Metric":         vrfExport.Metric,
+				"ValidateNexthop": vrfExport.ValidateNexthop,
 			})
 	}
 
@@ -571,7 +572,7 @@ func (e *netlinkExportClient) exportRoute(path *table.Path, rule *exportRule) er
 		prefix = nlri.String()
 	}
 
-	// Get nexthop
+	// Get nexthop - always require a valid nexthop
 	nexthop := path.GetNexthop()
 	if nexthop.IsUnspecified() {
 		return fmt.Errorf("no valid nexthop for %s", prefix)
@@ -661,6 +662,41 @@ func (e *netlinkExportClient) exportRoute(path *table.Path, rule *exportRule) er
 		Table:    rule.TableId,
 		Priority: int(rule.Metric),
 		Protocol: go_netlink.RouteProtocol(e.routeProtocol),
+	}
+
+	// If nexthop validation is disabled, set RTNH_F_ONLINK flag
+	// This tells the kernel to accept the nexthop even if it's not directly reachable
+	// For VRF tables, we also need to specify the VRF device
+	if !rule.ValidateNexthop {
+		route.Flags = int(go_netlink.FLAG_ONLINK)
+
+		// If exporting to a VRF, look up the VRF device and set LinkIndex
+		if rule.VrfName != "" {
+			vrfLink, err := e.client.LinkByName(rule.VrfName)
+			if err != nil {
+				e.logger.Warn("Failed to lookup VRF link for ONLINK route",
+					log.Fields{
+						"Topic": "netlink",
+						"VRF":   rule.VrfName,
+						"Error": err,
+					})
+			} else {
+				route.LinkIndex = vrfLink.Attrs().Index
+				e.logger.Debug("Setting VRF device for ONLINK route",
+					log.Fields{
+						"Topic":     "netlink",
+						"VRF":       rule.VrfName,
+						"LinkIndex": route.LinkIndex,
+					})
+			}
+		}
+
+		e.logger.Debug("Setting ONLINK flag for route with unvalidated nexthop",
+			log.Fields{
+				"Topic":   "netlink",
+				"Prefix":  prefix,
+				"Nexthop": nexthop.String(),
+			})
 	}
 
 	// Add the route
@@ -833,9 +869,19 @@ func (e *netlinkExportClient) scheduleUpdate(path *table.Path) {
 
 // processUpdate processes a route update (export or withdrawal)
 func (e *netlinkExportClient) processUpdate(path *table.Path) {
+	family := path.GetFamily()
+	nlri := path.GetNlri()
+
+	e.logger.Debug("processUpdate called",
+		log.Fields{
+			"Topic":      "netlink",
+			"Family":     family.String(),
+			"NLRI":       nlri.String(),
+			"IsWithdraw": path.IsWithdraw,
+		})
+
 	if path.IsWithdraw {
 		// Withdraw from all VRFs where this route was exported
-		nlri := path.GetNlri()
 		prefix := nlri.String()
 
 		e.mu.RLock()
@@ -853,22 +899,44 @@ func (e *netlinkExportClient) processUpdate(path *table.Path) {
 		return
 	}
 
-	// Check all global export rules
-	e.mu.RLock()
-	rules := make([]*exportRule, len(e.rules))
-	copy(rules, e.rules)
-	e.mu.RUnlock()
+	// Determine if this is a VPN family path (VRF route)
+	isVpnPath := family == bgp.RF_IPv4_VPN || family == bgp.RF_IPv6_VPN
 
-	for _, rule := range rules {
-		if e.matchesRule(path, rule) {
-			e.exportRoute(path, rule)
-		}
-	}
-
-	// Check per-VRF export rules for VPN family paths
-	family := path.GetFamily()
-	if family == bgp.RF_IPv4_VPN || family == bgp.RF_IPv6_VPN {
+	if isVpnPath {
+		// VPN family paths should only be processed by per-VRF export rules
 		e.processVrfExport(path)
+	} else {
+		// Regular unicast paths are processed by global export rules
+		e.mu.RLock()
+		rules := make([]*exportRule, len(e.rules))
+		copy(rules, e.rules)
+		e.mu.RUnlock()
+
+		nlri := path.GetNlri()
+		prefix := nlri.String()
+		communities := path.GetCommunities()
+
+		e.logger.Debug("Processing unicast path for export",
+			log.Fields{
+				"Topic":       "netlink",
+				"Prefix":      prefix,
+				"Communities": communities,
+				"RuleCount":   len(rules),
+			})
+
+		for _, rule := range rules {
+			matches := e.matchesRule(path, rule)
+			e.logger.Debug("Checking export rule",
+				log.Fields{
+					"Topic":   "netlink",
+					"Prefix":  prefix,
+					"Rule":    rule.Name,
+					"Matches": matches,
+				})
+			if matches {
+				e.exportRoute(path, rule)
+			}
+		}
 	}
 }
 
@@ -912,6 +980,14 @@ func (e *netlinkExportClient) processVrfExport(path *table.Path) {
 		Metric:          vrfExport.Metric,
 		ValidateNexthop: vrfExport.ValidateNexthop,
 	}
+
+	e.logger.Debug("Exporting VPN path with rule",
+		log.Fields{
+			"Topic":          "netlink",
+			"Prefix":         vpnNlri.IPPrefix(),
+			"VRF":            vrfName,
+			"ValidateNexthop": rule.ValidateNexthop,
+		})
 
 	e.exportRoute(path, rule)
 }

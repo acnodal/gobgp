@@ -302,6 +302,7 @@ func InitialConfig(ctx context.Context, bgpServer *server.BgpServer, newConfig *
 	}
 
 	bgpServer.GetBgpConfig().Netlink = newConfig.Netlink
+	bgpServer.GetBgpConfig().Vrfs = newConfig.Vrfs
 	if err := bgpServer.StartNetlink(ctx); err != nil {
 		bgpServer.Log().Fatal("failed to start netlink",
 			log.Fields{"Topic": "config", "Error": err})

@@ -118,11 +118,17 @@ service GoBgpService {
 message GetNetlinkRequest {
 }
 
+message NetlinkVrfImport {
+	string vrf_name = 1;
+	repeated string interfaces = 2;
+}
+
 message GetNetlinkResponse {
 	bool import_enabled = 1;
 	bool export_enabled = 2;
 	string vrf = 3;
 	repeated string interfaces = 4;
+	repeated NetlinkVrfImport vrf_imports = 5;
 }
 
 message StartBgpRequest {

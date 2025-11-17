@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/osrg/gobgp/v4/internal/pkg/table"
+	"github.com/osrg/gobgp/v4/pkg/config/oc"
 	"github.com/osrg/gobgp/v4/pkg/log"
 	"github.com/osrg/gobgp/v4/pkg/netlink"
 	"github.com/osrg/gobgp/v4/pkg/packet/bgp"
@@ -66,17 +67,77 @@ func newNetlinkClient(s *BgpServer) (*netlinkClient, error) {
 }
 
 func (n *netlinkClient) runImport() {
+	// Count VRFs in both config and RIB for debugging
+	configVrfCount := len(n.server.bgpConfig.Vrfs)
+	ribVrfCount := 0
+	if n.server.globalRib != nil {
+		ribVrfCount = len(n.server.globalRib.Vrfs)
+	}
+
+	n.server.logger.Debug("Running netlink import",
+		log.Fields{
+			"Topic":         "netlink",
+			"ConfigVRFs":    configVrfCount,
+			"RibVRFs":       ribVrfCount,
+		})
+
 	// Import for global table
 	if n.server.bgpConfig.Netlink.Import.Enabled {
 		vrfName := n.server.bgpConfig.Netlink.Import.Vrf
 		interfaces := n.server.bgpConfig.Netlink.Import.InterfaceList
+		n.server.logger.Debug("Global netlink import enabled",
+			log.Fields{
+				"Topic":      "netlink",
+				"TargetVRF":  vrfName,
+				"Interfaces": interfaces,
+			})
 		n.importForVrf(vrfName, interfaces)
 	}
 
 	// Import for each VRF with netlink-import configured
-	for _, vrf := range n.server.bgpConfig.Vrfs {
-		if vrf.NetlinkImport.Enabled {
-			n.importForVrf(vrf.Config.Name, vrf.NetlinkImport.InterfaceList)
+	// Check both bgpConfig.Vrfs and globalRib.Vrfs since VRFs added via API
+	// may not be in bgpConfig.Vrfs yet
+	vrfConfigMap := make(map[string]*oc.Vrf)
+	for i := range n.server.bgpConfig.Vrfs {
+		vrf := &n.server.bgpConfig.Vrfs[i]
+		vrfConfigMap[vrf.Config.Name] = vrf
+	}
+
+	// Iterate over active VRFs in the RIB
+	if n.server.globalRib != nil {
+		for vrfName := range n.server.globalRib.Vrfs {
+			// Look up VRF config
+			vrfConfig, hasConfig := vrfConfigMap[vrfName]
+
+			n.server.logger.Debug("Checking VRF for import",
+				log.Fields{
+					"Topic":      "netlink",
+					"VRF":        vrfName,
+					"HasConfig":  hasConfig,
+				})
+
+			if hasConfig && vrfConfig.NetlinkImport.Enabled {
+				n.server.logger.Info("Starting VRF import",
+					log.Fields{
+						"Topic":      "netlink",
+						"VRF":        vrfName,
+						"Interfaces": vrfConfig.NetlinkImport.InterfaceList,
+					})
+				n.importForVrf(vrfName, vrfConfig.NetlinkImport.InterfaceList)
+			} else if hasConfig {
+				n.server.logger.Debug("VRF import not enabled",
+					log.Fields{
+						"Topic":         "netlink",
+						"VRF":           vrfName,
+						"ImportEnabled": vrfConfig.NetlinkImport.Enabled,
+					})
+			} else {
+				n.server.logger.Debug("No config found for VRF",
+					log.Fields{
+						"Topic": "netlink",
+						"VRF":   vrfName,
+					})
+			}
 		}
 	}
 }
@@ -86,6 +147,13 @@ func (n *netlinkClient) importForVrf(vrfName string, interfaces []string) {
 	if n.advertisedPaths[vrfName] == nil {
 		n.advertisedPaths[vrfName] = make(map[string]*table.Path)
 	}
+
+	n.server.logger.Debug("Starting VRF import scan",
+		log.Fields{
+			"Topic":      "netlink",
+			"VRF":        vrfName,
+			"Interfaces": interfaces,
+		})
 
 	currentPaths := make(map[string]*table.Path)
 
@@ -102,17 +170,46 @@ func (n *netlinkClient) importForVrf(vrfName string, interfaces []string) {
 				})
 			continue
 		}
+		n.server.logger.Debug("Found routes on interface",
+			log.Fields{
+				"Topic":      "netlink",
+				"VRF":        vrfName,
+				"Interface":  iface,
+				"RouteCount": len(routes),
+			})
 		for _, path := range n.ipNetsToPaths(routes, iface) {
 			key := path.GetNlri().String()
 			currentPaths[key] = path
+			n.server.logger.Debug("Adding route to current paths",
+				log.Fields{
+					"Topic":  "netlink",
+					"VRF":    vrfName,
+					"Route":  key,
+					"Family": path.GetFamily().String(),
+				})
 		}
 	}
+
+	n.server.logger.Debug("VRF import scan complete",
+		log.Fields{
+			"Topic":           "netlink",
+			"VRF":             vrfName,
+			"CurrentPaths":    len(currentPaths),
+			"AdvertisedPaths": len(n.advertisedPaths[vrfName]),
+		})
 
 	// Find new paths to add
 	newPathList := make([]*table.Path, 0)
 	for key, path := range currentPaths {
 		if _, ok := n.advertisedPaths[vrfName][key]; !ok {
 			newPathList = append(newPathList, path)
+			n.server.logger.Debug("New route to import",
+				log.Fields{
+					"Topic":  "netlink",
+					"VRF":    vrfName,
+					"Route":  key,
+					"Family": path.GetFamily().String(),
+				})
 		}
 	}
 
@@ -135,6 +232,12 @@ func (n *netlinkClient) importForVrf(vrfName string, interfaces []string) {
 
 	// Propagate changes
 	if len(newPathList) > 0 {
+		n.server.logger.Info("Importing routes to VRF",
+			log.Fields{
+				"Topic":      "netlink",
+				"VRF":        vrfName,
+				"RouteCount": len(newPathList),
+			})
 		if err := n.server.addPathList(vrfName, newPathList); err != nil {
 			n.server.logger.Error("failed to add path from netlink",
 				log.Fields{
@@ -148,6 +251,12 @@ func (n *netlinkClient) importForVrf(vrfName string, interfaces []string) {
 			n.stats.LastErrorMsg = err.Error()
 			n.statsMu.Unlock()
 		} else {
+			n.server.logger.Info("Successfully imported routes to VRF",
+				log.Fields{
+					"Topic":      "netlink",
+					"VRF":        vrfName,
+					"RouteCount": len(newPathList),
+				})
 			n.statsMu.Lock()
 			n.stats.Imported += uint64(len(newPathList))
 			n.stats.LastImport = time.Now()
@@ -175,6 +284,12 @@ func (n *netlinkClient) importForVrf(vrfName string, interfaces []string) {
 			n.statsMu.Unlock()
 		}
 	}
+}
+
+// rescan triggers an immediate import scan (called when VRFs are added/changed)
+func (n *netlinkClient) rescan() {
+	n.server.logger.Debug("Triggering immediate netlink import rescan", log.Fields{"Topic": "netlink"})
+	n.runImport()
 }
 
 func (n *netlinkClient) loop() {
