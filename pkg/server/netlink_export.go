@@ -165,33 +165,81 @@ func (e *netlinkExportClient) cleanupStaleRoutes() error {
 	e.logger.Info("Cleaning up stale netlink routes from previous runs",
 		log.Fields{"Topic": "netlink", "Protocol": e.routeProtocol})
 
-	// Get all routes from the main routing table
-	routes, err := e.client.RouteList(nil, go_netlink.FAMILY_ALL)
-	if err != nil {
-		return fmt.Errorf("failed to list routes: %w", err)
+	// We need to list routes from all tables (including VRFs)
+	// The netlink library's RouteList(nil, family) only lists from the main table
+	// So we need to get all links and check their associated tables
+
+	// First, get all VRF links to find their table IDs
+	tablesToCheck := []int{0} // 0 means main table
+
+	links, err := e.client.LinkList()
+	if err == nil {
+		for _, link := range links {
+			if link.Type() == "vrf" {
+				// VRF links have a table attribute
+				if vrfLink, ok := link.(*go_netlink.Vrf); ok {
+					tablesToCheck = append(tablesToCheck, int(vrfLink.Table))
+				}
+			}
+		}
 	}
 
-	cleanedCount := 0
-	for _, route := range routes {
-		// Check if this route was created by us (matching our protocol)
-		if route.Protocol == go_netlink.RouteProtocol(e.routeProtocol) {
-			e.logger.Debug("Deleting stale route",
-				log.Fields{
-					"Topic":  "netlink",
-					"Prefix": route.Dst.String(),
-					"Table":  route.Table,
-					"Metric": route.Priority,
-				})
+	e.logger.Debug("Checking tables for stale routes",
+		log.Fields{
+			"Topic":  "netlink",
+			"Tables": tablesToCheck,
+		})
 
-			if err := e.client.RouteDel(&route); err != nil {
-				e.logger.Warn("Failed to delete stale route",
+	cleanedCount := 0
+
+	// Check each table
+	for _, tableId := range tablesToCheck {
+		// List all routes from this table
+		var routes []go_netlink.Route
+		if tableId == 0 {
+			// Main table
+			routes, err = e.client.RouteList(nil, go_netlink.FAMILY_ALL)
+		} else {
+			// Specific table - use RouteListFiltered
+			filter := &go_netlink.Route{
+				Table: tableId,
+			}
+			routes, err = e.client.RouteListFiltered(go_netlink.FAMILY_ALL, filter, go_netlink.RT_FILTER_TABLE)
+		}
+
+		if err != nil {
+			e.logger.Warn("Failed to list routes from table",
+				log.Fields{
+					"Topic": "netlink",
+					"Table": tableId,
+					"Error": err,
+				})
+			continue
+		}
+
+		// Filter and delete routes matching our protocol
+		for _, route := range routes {
+			if route.Protocol == go_netlink.RouteProtocol(e.routeProtocol) {
+				e.logger.Debug("Deleting stale route",
 					log.Fields{
-						"Topic":  "netlink",
-						"Prefix": route.Dst.String(),
-						"Error":  err,
+						"Topic":    "netlink",
+						"Prefix":   route.Dst.String(),
+						"Table":    route.Table,
+						"Protocol": route.Protocol,
+						"Metric":   route.Priority,
 					})
-			} else {
-				cleanedCount++
+
+				if err := e.client.RouteDel(&route); err != nil {
+					e.logger.Warn("Failed to delete stale route",
+						log.Fields{
+							"Topic":  "netlink",
+							"Prefix": route.Dst.String(),
+							"Table":  route.Table,
+							"Error":  err,
+						})
+				} else {
+					cleanedCount++
+				}
 			}
 		}
 	}
@@ -555,16 +603,26 @@ func (e *netlinkExportClient) exportRoute(path *table.Path, rule *exportRule) er
 
 	if family == bgp.RF_IPv4_VPN || family == bgp.RF_IPv6_VPN {
 		// VPN family - extract plain prefix without RD
-		if vpnNlri, ok := nlri.(*bgp.LabeledVPNIPAddrPrefix); ok {
+		switch vpnNlri := nlri.(type) {
+		case *bgp.LabeledVPNIPAddrPrefix:
 			prefix = vpnNlri.IPPrefix() // Returns "10.0.0.0/24" without RD
-			e.logger.Debug("Processing VPN family path",
+			e.logger.Debug("Processing IPv4 VPN family path",
 				log.Fields{
 					"Topic":  "netlink",
 					"Prefix": prefix,
 					"RD":     vpnNlri.RD.String(),
 					"Family": family.String(),
 				})
-		} else {
+		case *bgp.LabeledVPNIPv6AddrPrefix:
+			prefix = vpnNlri.IPPrefix() // Returns "fd66:1::/64" without RD
+			e.logger.Debug("Processing IPv6 VPN family path",
+				log.Fields{
+					"Topic":  "netlink",
+					"Prefix": prefix,
+					"RD":     vpnNlri.RD.String(),
+					"Family": family.String(),
+				})
+		default:
 			return fmt.Errorf("unexpected VPN NLRI type for family %s", family.String())
 		}
 	} else {
@@ -753,9 +811,24 @@ func (e *netlinkExportClient) exportRoute(path *table.Path, rule *exportRule) er
 
 // withdrawRoute removes a BGP path from the Linux routing table
 func (e *netlinkExportClient) withdrawRoute(path *table.Path, vrfName string) error {
-	// Get prefix
+	// Get prefix - handle VPN families
 	nlri := path.GetNlri()
-	prefix := nlri.String()
+	family := path.GetFamily()
+	var prefix string
+
+	// For VPN families, extract just the IP prefix without RD
+	if family == bgp.RF_IPv4_VPN || family == bgp.RF_IPv6_VPN {
+		switch vpnNlri := nlri.(type) {
+		case *bgp.LabeledVPNIPAddrPrefix:
+			prefix = vpnNlri.IPPrefix()
+		case *bgp.LabeledVPNIPv6AddrPrefix:
+			prefix = vpnNlri.IPPrefix()
+		default:
+			prefix = nlri.String()
+		}
+	} else {
+		prefix = nlri.String()
+	}
 
 	// Check if this route was exported
 	e.mu.RLock()
@@ -882,7 +955,20 @@ func (e *netlinkExportClient) processUpdate(path *table.Path) {
 
 	if path.IsWithdraw {
 		// Withdraw from all VRFs where this route was exported
-		prefix := nlri.String()
+		// For VPN families, extract just the IP prefix without RD
+		var prefix string
+		if family == bgp.RF_IPv4_VPN || family == bgp.RF_IPv6_VPN {
+			switch vpnNlri := nlri.(type) {
+			case *bgp.LabeledVPNIPAddrPrefix:
+				prefix = vpnNlri.IPPrefix()
+			case *bgp.LabeledVPNIPv6AddrPrefix:
+				prefix = vpnNlri.IPPrefix()
+			default:
+				prefix = nlri.String()
+			}
+		} else {
+			prefix = nlri.String()
+		}
 
 		e.mu.RLock()
 		vrfsToWithdraw := make([]string, 0)
@@ -892,6 +978,14 @@ func (e *netlinkExportClient) processUpdate(path *table.Path) {
 			}
 		}
 		e.mu.RUnlock()
+
+		e.logger.Debug("Processing withdrawal",
+			log.Fields{
+				"Topic":  "netlink",
+				"Prefix": prefix,
+				"Family": family.String(),
+				"VRFs":   vrfsToWithdraw,
+			})
 
 		for _, vrfName := range vrfsToWithdraw {
 			e.withdrawRoute(path, vrfName)
@@ -944,12 +1038,22 @@ func (e *netlinkExportClient) processUpdate(path *table.Path) {
 func (e *netlinkExportClient) processVrfExport(path *table.Path) {
 	// Extract RD and prefix from VPN NLRI
 	nlri := path.GetNlri()
-	vpnNlri, ok := nlri.(*bgp.LabeledVPNIPAddrPrefix)
-	if !ok {
+
+	var rd string
+	var prefix string
+
+	// Handle both IPv4 and IPv6 VPN NLRI
+	switch vpnNlri := nlri.(type) {
+	case *bgp.LabeledVPNIPAddrPrefix:
+		rd = vpnNlri.RD.String()
+		prefix = vpnNlri.IPPrefix()
+	case *bgp.LabeledVPNIPv6AddrPrefix:
+		rd = vpnNlri.RD.String()
+		prefix = vpnNlri.IPPrefix()
+	default:
+		// Not a VPN NLRI we handle
 		return
 	}
-
-	rd := vpnNlri.RD.String()
 
 	// Lookup VRF name from RD
 	e.mu.RLock()
@@ -983,9 +1087,9 @@ func (e *netlinkExportClient) processVrfExport(path *table.Path) {
 
 	e.logger.Debug("Exporting VPN path with rule",
 		log.Fields{
-			"Topic":          "netlink",
-			"Prefix":         vpnNlri.IPPrefix(),
-			"VRF":            vrfName,
+			"Topic":           "netlink",
+			"Prefix":          prefix,
+			"VRF":             vrfName,
 			"ValidateNexthop": rule.ValidateNexthop,
 		})
 
