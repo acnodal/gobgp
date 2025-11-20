@@ -68,7 +68,7 @@ Try [a binary release](https://github.com/osrg/gobgp/releases/latest).
 
 ## Community, discussion and support
 
-The Purelb team have a slack channel[Kubernetes/PureLB](https://kubernetes.slack.com/archives/C01BCB7U031) where you can post regarding the gobgp-netlink project.
+The Purelb team have a slack channel [Kubernetes/PureLB](https://kubernetes.slack.com/archives/C01BCB7U031) where you can post regarding the gobgp-netlink project.
 
 The original authors of GoBGP have a [Slack](https://join.slack.com/t/gobgp/shared_invite/zt-g9il5j8i-3gZwnXArK0O9Mnn4Yu~IrQ) for questions, discussion, suggestions, etc.
 
