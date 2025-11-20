@@ -94,7 +94,7 @@ func newDynamicPeer(g *oc.Global, neighborAddress string, pg *oc.PeerGroup, loc 
 			})
 		return nil
 	}
-	peer := newPeer(g, &conf, loc, policy, logger, nil)
+	peer := newPeer(g, &conf, loc, policy, logger)
 	peer.fsm.lock.Lock()
 	peer.fsm.state = bgp.BGP_FSM_ACTIVE
 	peer.fsm.lock.Unlock()
@@ -102,29 +102,28 @@ func newDynamicPeer(g *oc.Global, neighborAddress string, pg *oc.PeerGroup, loc 
 }
 
 type peer struct {
-	tableId             string
-	fsm                 *fsm
-	adjRibIn            *table.AdjRib
-	policy              *table.RoutingPolicy
-	localRib            *table.TableManager
-	peerInfo            *table.PeerInfo
-	prefixLimitWarned   map[bgp.Family]bool
+	tableId           string
+	fsm               *fsm
+	adjRibIn          *table.AdjRib
+	policy            *table.RoutingPolicy
+	localRib          *table.TableManager
+	peerInfo          *table.PeerInfo
+	prefixLimitWarned map[bgp.Family]bool
 	// map of path local identifiers sent for that prefix
 	sentPaths           map[table.PathDestLocalKey]map[uint32]struct{}
 	sendMaxPathFiltered map[table.PathLocalKey]struct{}
 	llgrEndChs          []chan struct{}
 }
 
-func newPeer(g *oc.Global, conf *oc.Neighbor, loc *table.TableManager, policy *table.RoutingPolicy, logger log.Logger, peerInfo *table.PeerInfo) *peer {
+func newPeer(g *oc.Global, conf *oc.Neighbor, loc *table.TableManager, policy *table.RoutingPolicy, logger log.Logger) *peer {
 	peer := &peer{
 		localRib:            loc,
 		policy:              policy,
-		peerInfo:            peerInfo,
+		fsm:                 newFSM(g, conf, logger),
 		prefixLimitWarned:   make(map[bgp.Family]bool),
 		sentPaths:           make(map[table.PathDestLocalKey]map[uint32]struct{}),
 		sendMaxPathFiltered: make(map[table.PathLocalKey]struct{}),
 	}
-	peer.fsm = newFSM(g, conf, logger, peer)
 	if peer.isRouteServerClient() {
 		peer.tableId = conf.State.NeighborAddress
 	} else {
@@ -630,7 +629,6 @@ func (peer *peer) handleUpdate(e *fsmMsg) ([]*table.Path, []bgp.Family, *bgp.BGP
 	peer.fsm.lock.Unlock()
 
 	pathList := table.ProcessMessage(m, peer.peerInfo, e.timestamp, treatAsWithdraw)
-
 	if len(pathList) > 0 {
 		paths := make([]*table.Path, 0, len(pathList))
 		eor := []bgp.Family{}

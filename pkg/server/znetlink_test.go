@@ -29,8 +29,8 @@ func TestNetlinkClient(t *testing.T) {
 
 	err := s.StartBgp(context.Background(), &api.StartBgpRequest{
 		Global: &api.Global{
-			Asn:      1,
-			RouterId: "1.1.1.1",
+			Asn:        1,
+			RouterId:   "1.1.1.1",
 			ListenPort: -1,
 		},
 	})
@@ -46,8 +46,8 @@ func TestEnableNetlink(t *testing.T) {
 
 	err := s.StartBgp(context.Background(), &api.StartBgpRequest{
 		Global: &api.Global{
-			Asn:      1,
-			RouterId: "1.1.1.1",
+			Asn:        1,
+			RouterId:   "1.1.1.1",
 			ListenPort: -1,
 		},
 	})
@@ -63,17 +63,10 @@ func TestEnableNetlink(t *testing.T) {
 	assert.Equal(t, "vrf1", s.bgpConfig.Netlink.Import.Vrf)
 	assert.Equal(t, []string{"eth0", "eth1"}, s.bgpConfig.Netlink.Import.InterfaceList)
 
-	// Test enabling export
+	// Test enabling export with rules
+	// Note: Export configuration now uses Rules structure instead of direct fields
 	s.bgpConfig.Netlink.Export.Enabled = true
-	s.bgpConfig.Netlink.Export.Vrf = "vrf1"
-	s.bgpConfig.Netlink.Export.Community = "test"
-	s.bgpConfig.Netlink.Export.CommunityList = []string{"100:100"}
-	s.bgpConfig.Netlink.Export.LargeCommunityList = []string{"200:200:200"}
 	err = s.StartNetlink(context.Background())
 	assert.NoError(t, err)
 	assert.True(t, s.bgpConfig.Netlink.Export.Enabled)
-	assert.Equal(t, "vrf1", s.bgpConfig.Netlink.Export.Vrf)
-	assert.Equal(t, "test", s.bgpConfig.Netlink.Export.Community)
-	assert.Equal(t, []string{"100:100"}, s.bgpConfig.Netlink.Export.CommunityList)
-	assert.Equal(t, []string{"200:200:200"}, s.bgpConfig.Netlink.Export.LargeCommunityList)
 }

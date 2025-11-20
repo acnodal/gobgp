@@ -3329,7 +3329,7 @@ func (s *BgpServer) getAdjRib(addr string, family bgp.Family, in bool, enableFil
 	return
 }
 
-func (s *BgpServer) ListPath(r apiutil.ListPathRequest, fn func(prefix bgp.AddrPrefixInterface, paths []*table.Path, v map[*table.Path]*table.Validation, filtered map[table.PathLocalKey]table.FilteredType)) error {
+func (s *BgpServer) ListPath(r apiutil.ListPathRequest, fn func(prefix bgp.AddrPrefixInterface, paths []*apiutil.Path)) error {
 	in := false
 	family := r.Family
 
@@ -3360,7 +3360,35 @@ func (s *BgpServer) ListPath(r apiutil.ListPathRequest, fn func(prefix bgp.AddrP
 		for _, dst := range tbl.GetDestinations() {
 			prefix := dst.GetNlri()
 			knownPathList := dst.GetAllKnownPathList()
-			fn(prefix, knownPathList, v, filtered)
+			paths := make([]*apiutil.Path, len(knownPathList))
+
+			for i, path := range knownPathList {
+				p := toPathApiUtil(path)
+				if validation := getValidation(v, path); validation != nil {
+					p.Validation = newValidationFromTableStruct(validation)
+				}
+				if !table.SelectionOptions.DisableBestPathSelection {
+					if i == 0 {
+						switch r.TableType {
+						case api.TableType_TABLE_TYPE_LOCAL, api.TableType_TABLE_TYPE_GLOBAL:
+							p.Best = true
+						}
+					} else if s.bgpConfig.Global.UseMultiplePaths.Config.Enabled && path.Equal(knownPathList[i-1]) {
+						p.Best = true
+					}
+				}
+				if r.EnableFiltered && filtered[path.GetLocalKey()]&table.PolicyFiltered > 0 {
+					p.Filtered = true
+				}
+				// we always want to know that some paths are filtered out
+				// by send-max attribute
+				if filtered[path.GetLocalKey()]&table.SendMaxFiltered > 0 {
+					p.SendMaxFiltered = true
+				}
+				paths[i] = p
+			}
+
+			fn(prefix, paths)
 		}
 		return nil
 	}()
@@ -3699,8 +3727,6 @@ func (s *BgpServer) addNeighbor(c *oc.Neighbor) error {
 		return err
 	}
 
-	peerInfo := table.NewPeerInfo(&s.bgpConfig.Global, c, 0, 0, netip.Addr{}, netip.Addr{}, netip.Addr{}, netip.Addr{})
-
 	if vrf := c.Config.Vrf; vrf != "" {
 		if c.RouteServer.Config.RouteServerClient {
 			return fmt.Errorf("route server client can't be enslaved to VRF")
@@ -3745,7 +3771,7 @@ func (s *BgpServer) addNeighbor(c *oc.Neighbor) error {
 	if c.RouteServer.Config.RouteServerClient {
 		rib = s.rsRib
 	}
-	peer := newPeer(&s.bgpConfig.Global, c, rib, s.policy, s.logger, peerInfo)
+	peer := newPeer(&s.bgpConfig.Global, c, rib, s.policy, s.logger)
 	if err := s.policy.SetPeerPolicy(peer.ID(), c.ApplyPolicy); err != nil {
 		return fmt.Errorf("failed to set peer policy for %s: %v", addr, err)
 	}

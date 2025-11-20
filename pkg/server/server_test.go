@@ -970,22 +970,19 @@ func newPeerandInfo(t *testing.T, myAs, as uint32, address string, rib *table.Ta
 	policy := table.NewRoutingPolicy(logger)
 	err = policy.Reset(&oc.RoutingPolicy{}, nil)
 	assert.NoError(t, err)
-
-	// Create peerInfo first as it's now required by newPeer
-	remoteAddr := netip.MustParseAddr(address)
-	localAddr := netip.MustParseAddr("1.1.1.1")
-	info := table.NewPeerInfo(gConf, nConf, as, myAs, remoteAddr, localAddr, remoteAddr, localAddr)
-
 	p := newPeer(
 		&oc.Global{Config: oc.GlobalConfig{As: myAs}},
 		nConf,
 		rib,
 		policy,
-		logger,
-		info)
+		logger)
 	for _, f := range rib.GetRFlist() {
 		p.fsm.rfMap[f] = bgp.BGP_ADD_PATH_NONE
 	}
+	remoteAddr := netip.MustParseAddr(address)
+	localAddr := netip.MustParseAddr("1.1.1.1")
+	info := table.NewPeerInfo(gConf, nConf, as, myAs, remoteAddr, localAddr, remoteAddr, localAddr)
+	p.peerInfo = info
 	return p
 }
 

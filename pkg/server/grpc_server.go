@@ -306,7 +306,7 @@ func (s *server) listPath(ctx context.Context, r *api.ListPathRequest, fn func(*
 		}
 	}
 
-	err := s.bgpServer.ListPath(req, func(prefix bgp.AddrPrefixInterface, paths []*table.Path, v map[*table.Path]*table.Validation, filtered map[table.PathLocalKey]table.FilteredType) {
+	err := s.bgpServer.ListPath(req, func(prefix bgp.AddrPrefixInterface, paths []*apiutil.Path) {
 		select {
 		case <-ctx.Done():
 			return
@@ -316,15 +316,7 @@ func (s *server) listPath(ctx context.Context, r *api.ListPathRequest, fn func(*
 				Paths:  make([]*api.Path, len(paths)),
 			}
 			for i, path := range paths {
-				p := toPathApiUtil(path)
-				p.Validation = newValidationFromTableStruct(getValidation(v, path))
-				if filtered != nil {
-					if f, ok := filtered[path.GetLocalKey()]; ok {
-						p.Filtered = f&table.PolicyFiltered > 0
-						p.SendMaxFiltered = f&table.SendMaxFiltered > 0
-					}
-				}
-				d.Paths[i] = toPathApi(p, r.EnableOnlyBinary, r.EnableNlriBinary, r.EnableAttributeBinary)
+				d.Paths[i] = toPathApi(path, r.EnableOnlyBinary, r.EnableNlriBinary, r.EnableAttributeBinary)
 			}
 			fn(&d)
 		}
