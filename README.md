@@ -1,4 +1,4 @@
-# GoBGP: BGP implementation in Go
+# GoBGP-Netlink: BGP implementation in Go with Redistribution Support via Netlink
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/osrg/gobgp)](https://goreportcard.com/report/github.com/osrg/gobgp)
 [![Tests](https://github.com/osrg/gobgp/actions/workflows/ci.yml/badge.svg)](https://github.com/osrg/gobgp/actions/workflows/ci.yml)
@@ -6,9 +6,13 @@
 [![Releases](https://img.shields.io/github/release/osrg/gobgp/all.svg?style=flat-square)](https://github.com/osrg/gobgp/releases)
 [![LICENSE](https://img.shields.io/github/license/osrg/gobgp.svg?style=flat-square)](https://github.com/osrg/gobgp/blob/master/LICENSE)
 
-GoBGP is an open source Border Gateway Protocol (BGP) implementation designed from scratch for
+GoBGP-Netlink is an open source Border Gateway Protocol (BGP) implementation designed from scratch for
 modern environment and implemented in a modern programming language,
 [the Go Programming Language](http://golang.org/).
+
+It is a fork of [gobgp](https://github.com/osrg/gobgp) that adds redistribution via Netlink to the Linux routing tables.  Further information on this can be found in the [Linux Netlink Integration](docs/sources/netlink.md) section.
+
+This fork is maintained by the PureLB Kubernetes Load Balancer team.
 
 ----
 
@@ -60,13 +64,15 @@ Try [a binary release](https://github.com/osrg/gobgp/releases/latest).
 
 ### Externals
 
-- [Tutorial: Using GoBGP as an IXP connecting router](http://www.slideshare.net/shusugimoto1986/tutorial-using-gobgp-as-an-ixp-connecting-router)
+
 
 ## Community, discussion and support
 
-We have the [Slack](https://join.slack.com/t/gobgp/shared_invite/zt-g9il5j8i-3gZwnXArK0O9Mnn4Yu~IrQ) for questions, discussion, suggestions, etc.
+The Purelb team have a slack channel[Kubernetes/PureLB](https://kubernetes.slack.com/archives/C01BCB7U031) where you can post regarding the gobgp-netlink project.
 
-You have code or documentation for GoBGP? Awesome! Send a pull
+The original authors of GoBGP have a [Slack](https://join.slack.com/t/gobgp/shared_invite/zt-g9il5j8i-3gZwnXArK0O9Mnn4Yu~IrQ) for questions, discussion, suggestions, etc.
+
+You have code or documentation for GoBGP-Netlink? Awesome! Send a pull
 request. No CLA, board members, governance, or other mess. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for info on
 code contributing.
 
