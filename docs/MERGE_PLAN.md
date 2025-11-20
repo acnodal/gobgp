@@ -2,7 +2,7 @@
 
 **Created**: 2025-11-19
 **Timeline**: 5-6 days
-**Target Version**: v1.0.0-netlink (based on GoBGP v4.0.0)
+**Target Version**: v1.0.0 (fork) based on GoBGP v4.0.0 (upstream)
 **Platform**: Linux-only deployment
 **GitHub Issue**: https://github.com/acnodal/gobgp/issues/2
 
@@ -652,7 +652,28 @@ This is expected behavior. The netlink feature requires the `vishvananda/netlink
 library which only supports Linux.
 ```
 
-### Phase 4: Create purelb/gobgp-netlink Fork (1 hour)
+### Phase 4: Create purelb/gobgp-netlink Fork (2-3 hours)
+
+#### Versioning Strategy
+
+**Dual Version Scheme**:
+- **Fork version**: v1.0.0 (our release version)
+- **Base version**: Based on upstream GoBGP v4.0.0
+
+This aligns our v1.0.0 release with upstream's v4.0.0 base:
+- `v1.0.0` = PureLB fork first major release
+- Based on upstream `v4.0.0` = GoBGP version 4.0.0
+
+**Version Display**:
+```
+$ ./gobgpd --version
+gobgpd version PureLB-fork:01.00.00 [base: gobgp-4.0.0]
+```
+
+**Future Versions**:
+- `v1.0.1`: Bug fix release (still based on GoBGP v4.0.0)
+- `v1.1.0`: Feature update (still based on GoBGP v4.0.0)
+- `v2.0.0`: Major update (likely based on newer GoBGP, e.g., v4.1.0+)
 
 #### Steps
 
@@ -661,7 +682,7 @@ library which only supports Linux.
    - Click "Fork" button
    - Select "purelb" organization
    - Repository name: `gobgp-netlink`
-   - Description: "GoBGP with Linux netlink integration (production fork)"
+   - Description: "GoBGP with Linux netlink integration for Kubernetes load balancing"
    - Click "Create fork"
 
 2. **Update Local Repository**
@@ -683,15 +704,16 @@ library which only supports Linux.
    - Change default branch from `master` to `main`
    - Confirm the change
 
-5. **Create Release Tag**
+5. **Create Release Tags** (Dual tagging strategy)
    ```bash
-   git tag -a v1.0.0-netlink -m "Release v1.0.0-netlink
+   # Tag v1.0.0 (our fork version)
+   git tag -a v1.0.0 -m "GoBGP-Netlink v1.0.0
 
-   First production release of GoBGP with netlink integration.
-   Based on GoBGP v4.0.0.
+   First production release of GoBGP with Linux netlink integration.
+   Based on upstream GoBGP v4.0.0.
 
    Features:
-   - Linux routing table import/export
+   - Linux routing table import/export via netlink
    - VRF-aware routing (IPv4 and IPv6)
    - Connected route import from interfaces
    - BGP route export to Linux routing tables
@@ -702,69 +724,140 @@ library which only supports Linux.
 
    Platform: Linux-only (kernel 4.3+ recommended)
 
-   Documentation: docs/sources/netlink-integration.md
+   Documentation: docs/sources/netlink.md
 
    🤖 Generated with Claude Code
    Co-Authored-By: Claude <noreply@anthropic.com>"
 
-   git push purelb v1.0.0-netlink
+   # Tag v4.0.0 (upstream alignment marker)
+   git tag -a v4.0.0 -m "Alignment with upstream GoBGP v4.0.0
+
+   This tag marks alignment with upstream osrg/gobgp v4.0.0.
+   For PureLB fork features, see v1.0.0.
+
+   🤖 Generated with Claude Code
+   Co-Authored-By: Claude <noreply@anthropic.com>"
+
+   # Push both tags
+   git push purelb v1.0.0
+   git push purelb v4.0.0
    ```
 
-6. **Create GitHub Release**
-   - Go to https://github.com/purelb/gobgp-netlink/releases/new
-   - Tag: `v1.0.0-netlink`
-   - Title: "v1.0.0-netlink - First Release with Netlink Integration"
-   - Description: Copy from tag message, add any additional notes
-   - Check "Create a discussion for this release"
-   - Click "Publish release"
+6. **Build Release Binaries**
+   ```bash
+   # Build for Linux amd64
+   GOOS=linux GOARCH=amd64 go build -o gobgpd-linux-amd64 \
+     -ldflags "-X github.com/osrg/gobgp/v4/internal/pkg/version.COMMIT=$(git rev-parse --short HEAD)" \
+     ./cmd/gobgpd
 
-7. **Update purelb/gobgp-netlink README**
+   GOOS=linux GOARCH=amd64 go build -o gobgp-linux-amd64 \
+     -ldflags "-X github.com/osrg/gobgp/v4/internal/pkg/version.COMMIT=$(git rev-parse --short HEAD)" \
+     ./cmd/gobgp
 
-   Add prominent notice at the top:
-   ```markdown
-   # GoBGP with Netlink Integration
+   # Build for Linux arm64
+   GOOS=linux GOARCH=arm64 go build -o gobgpd-linux-arm64 \
+     -ldflags "-X github.com/osrg/gobgp/v4/internal/pkg/version.COMMIT=$(git rev-parse --short HEAD)" \
+     ./cmd/gobgpd
 
-   > **Note**: This is a production fork of GoBGP with Linux netlink integration.
-   > Development happens at [acnodal/gobgp](https://github.com/acnodal/gobgp).
+   GOOS=linux GOARCH=arm64 go build -o gobgp-linux-arm64 \
+     -ldflags "-X github.com/osrg/gobgp/v4/internal/pkg/version.COMMIT=$(git rev-parse --short HEAD)" \
+     ./cmd/gobgp
 
-   ## Platform Support
+   # Verify binaries
+   file gobgpd-linux-* gobgp-linux-*
+   ```
 
-   **Linux Only** - This fork includes netlink integration which requires Linux.
-   - Supported: Linux (x86_64, arm64, arm)
-   - Kernel: 4.3+ (for VRF support)
-   - Not supported: Windows, macOS, FreeBSD
+7. **Create GitHub Release** (v1.0.0 - primary release)
+   ```bash
+   # Create release with binaries using gh CLI
+   gh release create v1.0.0 \
+     --repo purelb/gobgp-netlink \
+     --title "GoBGP-Netlink v1.0.0" \
+     --notes "# GoBGP-Netlink v1.0.0
+
+   First production release of GoBGP with Linux netlink integration.
+
+   ## Version Information
+   - **Fork Version**: v1.0.0
+   - **Based on**: GoBGP v4.0.0 (also tagged as \`v4.0.0\`)
+   - **Platform**: Linux-only
 
    ## Features
+   - ✅ Import connected routes from Linux interfaces into BGP RIB
+   - ✅ Export BGP routes to Linux routing tables
+   - ✅ Full VRF (Virtual Routing and Forwarding) support
+   - ✅ IPv4 and IPv6 dual-stack support
+   - ✅ Community-based export filtering
+   - ✅ Nexthop validation with ONLINK support
+   - ✅ CLI tools: \`gobgp netlink\` commands
+   - ✅ Statistics and observability
 
-   All standard GoBGP features, plus:
-   - Import connected routes from Linux interfaces to BGP
-   - Export BGP routes to Linux routing tables
-   - Full VRF (Virtual Routing and Forwarding) support
-   - IPv4 and IPv6 address families
-   - Community-based export filtering
-   - Nexthop validation
+   ## Documentation
+   - [Netlink Integration Guide](https://github.com/purelb/gobgp-netlink/blob/main/docs/sources/netlink.md)
+   - [Configuration Examples](https://github.com/purelb/gobgp-netlink/blob/main/docs/sources/configuration.md)
+   - [Test Coverage Analysis](https://github.com/purelb/gobgp-netlink/blob/main/docs/TEST_COVERAGE_ANALYSIS.md)
+   - [Smoke Test Results](https://github.com/purelb/gobgp-netlink/blob/main/docs/SMOKE_TEST_RESULTS.md)
 
-   See [Netlink Integration](docs/sources/netlink-integration.md) for details.
+   ## Platform Requirements
+   ⚠️ **Linux-only**: Uses vishvananda/netlink library
+   - Kernel 4.3+ (for VRF support)
+   - Root or CAP_NET_ADMIN capability
 
-   ## Releases
+   ## Installation
+   Download the appropriate binary for your architecture:
+   - \`gobgpd-linux-amd64\` / \`gobgp-linux-amd64\` for x86_64 systems
+   - \`gobgpd-linux-arm64\` / \`gobgp-linux-arm64\` for ARM64 systems
 
-   This fork uses a modified version scheme: `vX.X.X-netlink`
-   - v1.0.0-netlink: Based on GoBGP v4.0.0
+   ## Testing
+   All 16 automated smoke tests passing (100%). See [SMOKE_TEST_RESULTS.md](https://github.com/purelb/gobgp-netlink/blob/main/docs/SMOKE_TEST_RESULTS.md).
 
-   ## Upstream
+   ## Known Issues
+   - VRF export with same-subnet nexthop may fail (use ONLINK with validate-nexthop=false)
 
-   - **Upstream GoBGP**: [osrg/gobgp](https://github.com/osrg/gobgp)
-   - **Development Fork**: [acnodal/gobgp](https://github.com/acnodal/gobgp)
-   - **Production Fork**: [purelb/gobgp-netlink](https://github.com/purelb/gobgp-netlink) (this repository)
+   ## Acknowledgments
+   - Original GoBGP: [osrg/gobgp](https://github.com/osrg/gobgp)
+   - Maintained by: PureLB Kubernetes Load Balancer Team" \
+     gobgpd-linux-amd64 \
+     gobgpd-linux-arm64 \
+     gobgp-linux-amd64 \
+     gobgp-linux-arm64
+
+   # Create marker release for v4.0.0 (upstream alignment)
+   gh release create v4.0.0 \
+     --repo purelb/gobgp-netlink \
+     --title "Upstream Alignment: GoBGP v4.0.0" \
+     --notes "# Upstream GoBGP v4.0.0 Alignment
+
+   This tag marks alignment with upstream osrg/gobgp v4.0.0.
+
+   **For PureLB fork-specific features and releases, see the v1.x.x release series.**
+
+   This tag exists for:
+   - Dependency management (Go modules referencing base version)
+   - Clear upstream version tracking
+   - Semantic versioning clarity
+
+   Primary release: [v1.0.0](https://github.com/purelb/gobgp-netlink/releases/tag/v1.0.0)"
    ```
+
+8. **Update README.md for Fork**
+
+   The README has already been updated with PureLB branding. Verify it includes:
+   - [ ] Fork name: GoBGP-Netlink
+   - [ ] PureLB team attribution
+   - [ ] Linux-only warning
+   - [ ] Link to netlink documentation
+   - [ ] Community/support links
 
 #### Verification Checklist
 - [ ] purelb/gobgp-netlink repository created
 - [ ] `main` branch is default branch
-- [ ] v1.0.0-netlink tag pushed
-- [ ] GitHub release created
-- [ ] README updated with platform notice
-- [ ] Fork relationship documented
+- [ ] v1.0.0 tag pushed (primary release)
+- [ ] v4.0.0 tag pushed (upstream alignment marker)
+- [ ] Both GitHub releases created
+- [ ] Release binaries built and attached
+- [ ] README verified with PureLB branding
+- [ ] Version numbers updated in version.go (MAJOR=4, FORK_MAJOR=1)
 
 ## Platform Support Details
 
@@ -829,13 +922,20 @@ jobs:
 
 ### Version Scheme
 
-Format: `vX.X.X-netlink`
+**Dual Tagging Strategy**:
+
+Format: `vX.X.X` (fork version) + `vY.Y.Y` (upstream alignment)
 
 Examples:
-- `v1.0.0-netlink`: First release (based on GoBGP v4.0.0)
-- `v1.1.0-netlink`: Feature update
-- `v1.0.1-netlink`: Bug fix
-- `v2.0.0-netlink`: Major update (possibly based on newer GoBGP)
+- `v1.0.0` + `v4.0.0`: First release (fork v1.0.0, based on GoBGP v4.0.0)
+- `v1.0.1` + `v4.0.0`: Bug fix (fork v1.0.1, still based on GoBGP v4.0.0)
+- `v1.1.0` + `v4.0.0`: Feature update (fork v1.1.0, still based on GoBGP v4.0.0)
+- `v2.0.0` + `v4.1.0`: Major update (fork v2.0.0, rebased on GoBGP v4.1.0)
+
+**Version Display**:
+- Binary reports: `PureLB-fork:01.00.00 [base: gobgp-4.0.0]`
+- Go module: `github.com/purelb/gobgp-netlink/v4@v1.0.0` (uses v4 module path, fork version tags)
+- GitHub releases: `v1.0.0` (primary), `v4.0.0` (marker)
 
 ### Update Process
 
@@ -857,9 +957,11 @@ When GoBGP upstream releases new version (e.g., v4.1.0):
    ```bash
    git checkout main
    git merge origin/master  # Merge from acnodal
-   git tag -a v1.1.0-netlink -m "Release v1.1.0-netlink based on GoBGP v4.1.0"
+   git tag -a v1.1.0 -m "Release v1.1.0 based on GoBGP v4.1.0"
+   git tag -a v4.1.0 -m "Alignment with upstream GoBGP v4.1.0"
    git push purelb main
-   git push purelb v1.1.0-netlink
+   git push purelb v1.1.0
+   git push purelb v4.1.0
    ```
 
 ## Risk Assessment
@@ -914,7 +1016,8 @@ All criteria must be met before Phase 4 (fork creation):
 - [ ] Performance metrics acceptable (convergence time, memory, CPU)
 - [ ] Code reviewed and approved
 - [ ] purelb/gobgp-netlink fork created with main branch (Phase 4)
-- [ ] v1.0.0-netlink release tagged and published
+- [ ] v1.0.0 and v4.0.0 releases tagged and published
+- [ ] Release binaries built and attached to v1.0.0
 - [ ] Release notes and documentation published
 
 ## Rollback Plan

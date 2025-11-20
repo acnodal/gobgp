@@ -19,14 +19,14 @@ import "fmt"
 
 const (
 	// Original GoBGP version this fork is based on
-	MAJOR uint = 3
-	MINOR uint = 37
+	MAJOR uint = 4
+	MINOR uint = 0
 	PATCH uint = 0
 
 	// PureLB fork version
 	FORK_NAME  string = "PureLB-fork"
-	FORK_MAJOR uint   = 0
-	FORK_MINOR uint   = 1
+	FORK_MAJOR uint   = 1
+	FORK_MINOR uint   = 0
 	FORK_PATCH uint   = 0
 )
 
