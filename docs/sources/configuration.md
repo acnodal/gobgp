@@ -336,4 +336,51 @@
             options = "remove"
             [policy-definitions.statements.actions.bgp-actions.set-large-community.set-large-community-method]
                 communities-list = ["100:200:300", "^200:"]
+
+# Linux Netlink Integration (Linux-only)
+
+# Import routes from Linux interfaces into GoBGP
+[netlink]
+  [netlink.import]
+    enabled = true
+    interface-list = ["eth0", "eth1"]
+
+  # Export BGP routes to Linux routing tables
+  [netlink.export]
+    enabled = true
+    route-protocol = 201
+    dampening-interval = 1000
+
+# Export to global routing table
+[[netlink.export.rules]]
+  name = "default-export"
+  vrf = ""
+  table-id = 0
+  metric = 100
+  validate-nexthop = true
+  community-list = []
+
+# Per-VRF netlink import/export
+[[vrfs]]
+  [vrfs.config]
+    name = "vrf-customer1"
+    rd = "64512:100"
+    import-rt-list = ["64512:100"]
+    export-rt-list = ["64512:100"]
+
+  # Import from Linux VRF interfaces
+  [vrfs.netlink-import]
+    enabled = true
+    interface-list = ["eth2", "eth3"]
+
+  # Export to Linux VRF routing table
+  [vrfs.netlink-export]
+    enabled = true
+    linux-vrf = "vrf-customer1"
+    linux-table-id = 100
+    metric = 50
+    validate-nexthop = false
+    community-list = []
 ```
+
+See [Netlink Integration](netlink.md) for detailed documentation.

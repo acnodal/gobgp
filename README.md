@@ -30,6 +30,12 @@ Try [a binary release](https://github.com/osrg/gobgp/releases/latest).
 - Zebra Integration
   - [FIB manipulation](docs/sources/zebra.md)
   - [Equal Cost Multipath Routing](docs/sources/zebra-multipath.md)
+- **Linux Netlink Integration** ⚠️ Linux-only
+  - [Netlink Import/Export](docs/sources/netlink.md)
+  - Import connected routes from Linux interfaces
+  - Export BGP routes to Linux routing tables
+  - Full VRF (Virtual Routing and Forwarding) support
+  - IPv4 and IPv6 address families
 - [MRT](docs/sources/mrt.md)
 - [BMP](docs/sources/bmp.md)
 - [EVPN](docs/sources/evpn.md)
