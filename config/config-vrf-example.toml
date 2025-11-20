@@ -1,0 +1,65 @@
+# Example configuration demonstrating VRF-aware netlink import
+
+[global.config]
+  as = 64551
+  router-id = "192.168.151.100"
+
+# Global table netlink import (no VRF)
+[netlink]
+  [netlink.import]
+    enabled = true
+    interface-list = ["kubelb0"]
+
+# VRF definitions with per-VRF netlink import
+[[vrfs]]
+  [vrfs.config]
+    name = "customer-a"
+    rd = "64551:100"
+    import-rt-list = ["64551:100"]
+    export-rt-list = ["64551:100"]
+  # Import routes from eth1 and eth2 into customer-a VRF
+  [vrfs.netlink-import]
+    enabled = true
+    interface-list = ["eth1", "eth2"]
+
+[[vrfs]]
+  [vrfs.config]
+    name = "customer-b"
+    rd = "64551:200"
+    import-rt-list = ["64551:200"]
+    export-rt-list = ["64551:200"]
+  # Import routes from eth3 into customer-b VRF
+  [vrfs.netlink-import]
+    enabled = true
+    interface-list = ["eth3"]
+
+# VRF without netlink import (only for BGP routes)
+[[vrfs]]
+  [vrfs.config]
+    name = "customer-c"
+    rd = "64551:300"
+    import-rt-list = ["64551:300"]
+    export-rt-list = ["64551:300"]
+
+# BGP neighbors
+[[neighbors]]
+  [neighbors.config]
+    neighbor-address = "192.168.151.161"
+    peer-as = "65413"
+  [[neighbors.afi-safis]]
+    [neighbors.afi-safis.config]
+       afi-safi-name = "ipv4-unicast"
+  [[neighbors.afi-safis]]
+    [neighbors.afi-safis.config]
+       afi-safi-name = "ipv6-unicast"
+
+[[neighbors]]
+  [neighbors.config]
+    neighbor-address = "192.168.151.101"
+    peer-as = "64553"
+  [[neighbors.afi-safis]]
+    [neighbors.afi-safis.config]
+       afi-safi-name = "ipv4-unicast"
+  [[neighbors.afi-safis]]
+    [neighbors.afi-safis.config]
+       afi-safi-name = "ipv6-unicast"

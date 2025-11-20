@@ -110,27 +110,29 @@ func newSharedData() *sharedData {
 }
 
 type BgpServer struct {
-	shared       *sharedData
-	apiServer    *server
-	bgpConfig    oc.Bgp
-	acceptCh     chan net.Conn
-	mgmtCh       chan *mgmtOp
-	policy       *table.RoutingPolicy
-	listeners    []*netutils.TCPListener
-	neighborMap  map[string]*peer
-	peerGroupMap map[string]*peerGroup
-	globalRib    *table.TableManager
-	rsRib        *table.TableManager
-	roaManager   *roaManager
-	shutdownWG   *sync.WaitGroup
-	watcherMap   map[watchEventType][]*watcher
-	zclient      *zebraClient
-	bmpManager   *bmpClientManager
-	mrtManager   *mrtManager
-	roaTable     *table.ROATable
-	uuidMap      map[string]uuid.UUID
-	logger       log.Logger
-	timingHook   FSMTimingHook
+	shared        *sharedData
+	apiServer     *server
+	bgpConfig     oc.Bgp
+	acceptCh      chan net.Conn
+	mgmtCh        chan *mgmtOp
+	policy        *table.RoutingPolicy
+	listeners     []*netutils.TCPListener
+	neighborMap   map[string]*peer
+	peerGroupMap  map[string]*peerGroup
+	globalRib     *table.TableManager
+	rsRib         *table.TableManager
+	roaManager    *roaManager
+	shutdownWG    *sync.WaitGroup
+	watcherMap    map[watchEventType][]*watcher
+	zclient       *zebraClient
+	bmpManager    *bmpClientManager
+	mrtManager    *mrtManager
+	roaTable      *table.ROATable
+	uuidMap       map[string]uuid.UUID
+	logger              log.Logger
+	timingHook          FSMTimingHook
+	netlinkClient       *netlinkClient
+	netlinkExportClient *netlinkExportClient
 }
 
 func NewBgpServer(opt ...ServerOption) *BgpServer {
@@ -1189,6 +1191,10 @@ func (s *BgpServer) handleRouteRefresh(peer *peer, e *fsmMsg) []*table.Path {
 }
 
 func (s *BgpServer) propagateUpdate(peer *peer, pathList []*table.Path) {
+	s.logger.Debug("propagate update", log.Fields{
+		"Topic": "propagate",
+		"Path":  pathList,
+	})
 	rs := peer != nil && peer.isRouteServerClient()
 	vrf := false
 	if peer != nil {
@@ -1310,6 +1316,11 @@ func (s *BgpServer) propagateUpdate(peer *peer, pathList []*table.Path) {
 
 		if dsts := rib.Update(path); len(dsts) > 0 {
 			s.propagateUpdateToNeighbors(rib, peer, path, dsts, true)
+
+			// Export to Linux routing table if export is enabled
+			if s.netlinkExportClient != nil {
+				s.netlinkExportClient.scheduleUpdate(path)
+			}
 		}
 	}
 }
@@ -1665,9 +1676,69 @@ func (s *BgpServer) handleFSMMessage(peer *peer, e *fsmMsg) {
 				netip.MustParseAddr(peer.fsm.pConf.State.RemoteRouterId),
 				netip.MustParseAddr(peer.fsm.gConf.Config.RouterId), remoteAddr, localAddr)
 
+			// Read interface name from config while we have the lock
+			interfaceName := peer.fsm.pConf.Config.NeighborInterface
+
 			neighborAddress := peer.fsm.pConf.State.NeighborAddress
 
 			peer.fsm.lock.Unlock()
+
+			// Now do I/O operations without holding the lock
+			// Determine which interface to use for nexthop lookup
+			if interfaceName == "" && localTCP.Zone != "" {
+				// For link-local connections, use the zone as interface name
+				interfaceName = localTCP.Zone
+			}
+			if interfaceName == "" {
+				// Try to determine interface from local TCP address
+				ifName, err := netutils.GetInterfaceByIP(localTCP.IP)
+				if err != nil {
+					s.logger.Debug("could not determine interface from local address",
+						log.Fields{"Topic": "Peer", "Key": peer.ID(), "LocalAddr": localTCP.IP, "Error": err})
+				} else {
+					interfaceName = ifName
+					s.logger.Debug("determined interface from local address",
+						log.Fields{"Topic": "Peer", "Key": peer.ID(), "LocalAddr": localTCP.IP, "Interface": interfaceName})
+				}
+			}
+
+			// Populate IPv4 nexthop
+			if localTCP.IP.To4() != nil {
+				// IPv4 TCP session - use TCP address as primary
+				peer.peerInfo.IPv4Nexthop = localTCP.IP
+			}
+			// Try to get IPv4 from interface (might override TCP address, or provide it if TCP is IPv6)
+			if interfaceName != "" {
+				if ipv4, err := netutils.GetIPv4Nexthop(interfaceName, s.logger); err == nil {
+					peer.peerInfo.IPv4Nexthop = ipv4.To4()
+					s.logger.Debug("Set IPv4 nexthop from interface",
+						log.Fields{"Topic": "Peer", "Key": peer.ID(), "IPv4Nexthop": peer.peerInfo.IPv4Nexthop})
+				}
+			}
+
+			// Populate IPv6 nexthops
+			if localTCP.IP.To4() == nil {
+				// IPv6 TCP session - use TCP address as primary
+				peer.peerInfo.IPv6Nexthop = localTCP.IP
+			}
+			// Try to get IPv6 from interface (might override TCP address, or provide it if TCP is IPv4)
+			if interfaceName != "" {
+				if ipv6nexthops, err := netutils.GetIPv6Nexthops(interfaceName, s.logger); err == nil {
+					if ipv6nexthops.Global != nil {
+						// Ensure IPv6 address is in 16-byte format
+						peer.peerInfo.IPv6Nexthop = ipv6nexthops.Global.To16()
+						s.logger.Debug("Set IPv6 nexthop from interface",
+							log.Fields{"Topic": "Peer", "Key": peer.ID(), "IPv6Nexthop": peer.peerInfo.IPv6Nexthop})
+					}
+					if ipv6nexthops.LinkLocal != nil {
+						// Ensure IPv6 address is in 16-byte format
+						peer.peerInfo.IPv6LinkLocalNexthop = ipv6nexthops.LinkLocal.To16()
+						s.logger.Debug("Set IPv6 link-local nexthop from interface",
+							log.Fields{"Topic": "Peer", "Key": peer.ID(), "IPv6LinkLocal": peer.peerInfo.IPv6LinkLocalNexthop})
+					}
+				}
+			}
+
 			deferralExpiredFunc := func(family bgp.Family) func() {
 				//nolint: errcheck // ignore error
 				return func() {
@@ -1960,6 +2031,273 @@ func (s *BgpServer) EnableZebra(ctx context.Context, r *api.EnableZebraRequest) 
 	}, false)
 }
 
+func (s *BgpServer) parseExportRule(ruleConfig *oc.NetlinkExportRule) (*exportRule, error) {
+	rule := &exportRule{
+		Name:    ruleConfig.Name,
+		VrfName: ruleConfig.Vrf,
+		TableId: ruleConfig.TableId,
+		Metric:  ruleConfig.Metric,
+	}
+
+	// Default metric if not specified
+	if rule.Metric == 0 {
+		rule.Metric = 20
+	}
+
+	// Default nexthop validation is enabled
+	rule.ValidateNexthop = true
+	if ruleConfig.ValidateNexthop != nil {
+		rule.ValidateNexthop = *ruleConfig.ValidateNexthop
+	}
+
+	// Parse standard communities (format: "AS:VALUE" or uint32)
+	rule.Communities = make([]uint32, 0)
+	for _, commStr := range ruleConfig.CommunityList {
+		comm, err := table.ParseCommunity(commStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid community %s: %w", commStr, err)
+		}
+		rule.Communities = append(rule.Communities, comm)
+	}
+
+	// Parse large communities (format: "ASN:LocalData1:LocalData2")
+	rule.LargeCommunities = make([]*bgp.LargeCommunity, 0)
+	for _, lcStr := range ruleConfig.LargeCommunityList {
+		lc, err := bgp.ParseLargeCommunity(lcStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid large community %s: %w", lcStr, err)
+		}
+		rule.LargeCommunities = append(rule.LargeCommunities, lc)
+	}
+
+	return rule, nil
+}
+
+func (s *BgpServer) StartNetlink(ctx context.Context) error {
+	s.logger.Debug("start netlink", log.Fields{"start config": s.bgpConfig.Netlink})
+	if s.netlinkClient == nil {
+		n, err := newNetlinkClient(s)
+		if err != nil {
+			return err
+		}
+		s.netlinkClient = n
+	}
+
+	// Initialize export client if export is enabled
+	if s.bgpConfig.Netlink.Export.Enabled {
+		// Create export client if it doesn't exist
+		if s.netlinkExportClient == nil {
+			dampeningInterval := time.Duration(s.bgpConfig.Netlink.Export.DampeningInterval) * time.Millisecond
+			routeProtocol := s.bgpConfig.Netlink.Export.RouteProtocol
+
+			exportClient, err := newNetlinkExportClient(s, s.logger, routeProtocol, dampeningInterval)
+			if err != nil {
+				return fmt.Errorf("failed to create netlink export client: %w", err)
+			}
+			s.netlinkExportClient = exportClient
+		}
+
+		// Parse export rules (always reload to pick up configuration changes)
+		rules := make([]*exportRule, 0)
+		for _, ruleConfig := range s.bgpConfig.Netlink.Export.Rules {
+			rule, err := s.parseExportRule(&ruleConfig)
+			if err != nil {
+				s.logger.Warn("Failed to parse export rule",
+					log.Fields{
+						"Topic": "netlink",
+						"Rule":  ruleConfig.Name,
+						"Error": err,
+					})
+				continue
+			}
+			rules = append(rules, rule)
+			s.logger.Info("Loaded netlink export rule",
+				log.Fields{
+					"Topic":   "netlink",
+					"Rule":    rule.Name,
+					"VRF":     rule.VrfName,
+					"TableID": rule.TableId,
+				})
+		}
+
+		// Update rules (replaces existing rules to pick up config changes)
+		s.netlinkExportClient.setRules(rules)
+		s.logger.Info("Netlink export rules updated",
+			log.Fields{
+				"Topic":     "netlink",
+				"RuleCount": len(rules),
+			})
+
+		// Build VRF-to-VRF export mappings
+		if err := s.netlinkExportClient.buildVrfMappings(); err != nil {
+			s.logger.Warn("Failed to build VRF export mappings",
+				log.Fields{
+					"Topic": "netlink",
+					"Error": err,
+				})
+		}
+
+		// Re-evaluate all existing RIB routes with the new rules
+		// This ensures routes are exported/withdrawn based on the updated configuration
+		if s.globalRib != nil {
+			pathList := s.globalRib.GetBestPathList(table.GLOBAL_RIB_NAME, 0, nil)
+			s.logger.Info("Triggering route re-evaluation after rule update",
+				log.Fields{
+					"Topic":     "netlink",
+					"PathCount": len(pathList),
+				})
+			if len(pathList) > 0 {
+				s.netlinkExportClient.reEvaluateAllRoutes(pathList)
+			} else {
+				s.logger.Info("No routes in RIB to re-evaluate",
+					log.Fields{
+						"Topic": "netlink",
+					})
+			}
+		} else {
+			s.logger.Warn("globalRib is nil, cannot re-evaluate routes",
+				log.Fields{
+					"Topic": "netlink",
+				})
+		}
+	}
+
+	return nil
+}
+
+func (s *BgpServer) ListNetlinkExport(ctx context.Context, req *api.ListNetlinkExportRequest, fn func(*api.ListNetlinkExportResponse)) error {
+	if s.netlinkExportClient == nil {
+		return fmt.Errorf("netlink export not enabled")
+	}
+
+	exported := s.netlinkExportClient.listExported()
+
+	for vrfName, vrfRoutes := range exported {
+		// Filter by VRF if requested
+		if req.Vrf != "" && req.Vrf != vrfName {
+			continue
+		}
+
+		for prefix, info := range vrfRoutes {
+			route := &api.ListNetlinkExportResponse_ExportedRoute{
+				Prefix:     prefix,
+				Nexthop:    info.Route.Gw.String(),
+				Vrf:        vrfName,
+				TableId:    int32(info.Route.Table),
+				Metric:     uint32(info.Route.Priority),
+				RuleName:   info.RuleName,
+				ExportedAt: info.ExportedAt.Unix(),
+			}
+
+			fn(&api.ListNetlinkExportResponse{Route: route})
+		}
+	}
+
+	return nil
+}
+
+func (s *BgpServer) GetNetlinkExportStats(ctx context.Context, req *api.GetNetlinkExportStatsRequest) (*api.GetNetlinkExportStatsResponse, error) {
+	if s.netlinkExportClient == nil {
+		return nil, fmt.Errorf("netlink export not enabled")
+	}
+
+	stats := s.netlinkExportClient.getStats()
+
+	return &api.GetNetlinkExportStatsResponse{
+		Exported:                  stats.Exported,
+		Withdrawn:                 stats.Withdrawn,
+		Errors:                    stats.Errors,
+		NexthopValidationAttempts: stats.NexthopValidation,
+		NexthopValidationFailures: stats.NexthopFailed,
+		DampenedUpdates:           stats.DampenedUpdates,
+		LastExportTime:            stats.LastExport.Unix(),
+		LastWithdrawTime:          stats.LastWithdraw.Unix(),
+		LastErrorTime:             stats.LastError.Unix(),
+		LastErrorMsg:              stats.LastErrorMsg,
+	}, nil
+}
+
+func (s *BgpServer) FlushNetlinkExport(ctx context.Context, req *api.FlushNetlinkExportRequest) (*api.FlushNetlinkExportResponse, error) {
+	if s.netlinkExportClient == nil {
+		return nil, fmt.Errorf("netlink export not enabled")
+	}
+
+	err := s.netlinkExportClient.flush()
+	if err != nil {
+		return nil, fmt.Errorf("failed to flush netlink export: %w", err)
+	}
+
+	return &api.FlushNetlinkExportResponse{}, nil
+}
+
+func (s *BgpServer) ListNetlinkExportRules(ctx context.Context, req *api.ListNetlinkExportRulesRequest) (*api.ListNetlinkExportRulesResponse, error) {
+	if s.netlinkExportClient == nil {
+		return nil, fmt.Errorf("netlink export not enabled")
+	}
+
+	rules := s.netlinkExportClient.getRules()
+	apiRules := make([]*api.ListNetlinkExportRulesResponse_ExportRule, 0, len(rules))
+
+	for _, rule := range rules {
+		// Convert standard communities to strings (AS:Value format)
+		communityList := make([]string, 0, len(rule.Communities))
+		for _, comm := range rule.Communities {
+			communityList = append(communityList, fmt.Sprintf("%d:%d", comm>>16, comm&0xFFFF))
+		}
+
+		// Convert large communities to strings
+		largeCommunityList := make([]string, 0, len(rule.LargeCommunities))
+		for _, lcomm := range rule.LargeCommunities {
+			largeCommunityList = append(largeCommunityList, lcomm.String())
+		}
+
+		apiRule := &api.ListNetlinkExportRulesResponse_ExportRule{
+			Name:                rule.Name,
+			CommunityList:       communityList,
+			LargeCommunityList:  largeCommunityList,
+			Vrf:                 rule.VrfName,
+			TableId:             int32(rule.TableId),
+			Metric:              rule.Metric,
+			ValidateNexthop:     rule.ValidateNexthop,
+		}
+		apiRules = append(apiRules, apiRule)
+	}
+
+	// Get VRF export rules
+	vrfRules := s.netlinkExportClient.getVrfRules()
+	apiVrfRules := make([]*api.ListNetlinkExportRulesResponse_VrfExportRule, 0, len(vrfRules))
+
+	for _, vrfRule := range vrfRules {
+		// Convert standard communities to strings (AS:Value format)
+		communityList := make([]string, 0, len(vrfRule.CommunityList))
+		for _, comm := range vrfRule.CommunityList {
+			communityList = append(communityList, fmt.Sprintf("%d:%d", comm>>16, comm&0xFFFF))
+		}
+
+		// Convert large communities to strings
+		largeCommunityList := make([]string, 0, len(vrfRule.LargeCommunityList))
+		for _, lcomm := range vrfRule.LargeCommunityList {
+			largeCommunityList = append(largeCommunityList, lcomm.String())
+		}
+
+		apiVrfRule := &api.ListNetlinkExportRulesResponse_VrfExportRule{
+			GobgpVrf:           vrfRule.VrfName,
+			LinuxVrf:           vrfRule.LinuxVrf,
+			LinuxTableId:       int32(vrfRule.LinuxTableId),
+			Metric:             vrfRule.Metric,
+			ValidateNexthop:    vrfRule.ValidateNexthop,
+			CommunityList:      communityList,
+			LargeCommunityList: largeCommunityList,
+		}
+		apiVrfRules = append(apiVrfRules, apiVrfRule)
+	}
+
+	return &api.ListNetlinkExportRulesResponse{
+		Rules:    apiRules,
+		VrfRules: apiVrfRules,
+	}, nil
+}
+
 func (s *BgpServer) AddBmp(ctx context.Context, r *api.AddBmpRequest) error {
 	if r == nil {
 		return fmt.Errorf("nil request")
@@ -2003,6 +2341,46 @@ func (s *BgpServer) DeleteBmp(ctx context.Context, r *api.DeleteBmpRequest) erro
 			Port:    r.Port,
 		})
 	}, true)
+}
+
+func (s *BgpServer) GetNetlink(ctx context.Context, in *api.GetNetlinkRequest) (*api.GetNetlinkResponse, error) {
+	// Collect VRF import configurations
+	vrfImports := make([]*api.NetlinkVrfImport, 0)
+	for i := range s.bgpConfig.Vrfs {
+		vrf := &s.bgpConfig.Vrfs[i]
+		if vrf.NetlinkImport.Enabled {
+			vrfImports = append(vrfImports, &api.NetlinkVrfImport{
+				VrfName:    vrf.Config.Name,
+				Interfaces: vrf.NetlinkImport.InterfaceList,
+			})
+		}
+	}
+
+	return &api.GetNetlinkResponse{
+		ImportEnabled: s.bgpConfig.Netlink.Import.Enabled,
+		ExportEnabled: s.bgpConfig.Netlink.Export.Enabled,
+		Vrf:           s.bgpConfig.Netlink.Import.Vrf,
+		Interfaces:    s.bgpConfig.Netlink.Import.InterfaceList,
+		VrfImports:    vrfImports,
+	}, nil
+}
+
+func (s *BgpServer) GetNetlinkImportStats(ctx context.Context, req *api.GetNetlinkImportStatsRequest) (*api.GetNetlinkImportStatsResponse, error) {
+	if s.netlinkClient == nil {
+		return nil, fmt.Errorf("netlink import not enabled")
+	}
+
+	stats := s.netlinkClient.getStats()
+
+	return &api.GetNetlinkImportStatsResponse{
+		Imported:         stats.Imported,
+		Withdrawn:        stats.Withdrawn,
+		Errors:           stats.Errors,
+		LastImportTime:   stats.LastImport.Unix(),
+		LastWithdrawTime: stats.LastWithdraw.Unix(),
+		LastErrorTime:    stats.LastError.Unix(),
+		LastErrorMsg:     stats.LastErrorMsg,
+	}, nil
 }
 
 func (s *BgpServer) ListBmp(ctx context.Context, req *api.ListBmpRequest, fn func(*api.ListBmpResponse_BmpStation)) error {
@@ -2533,6 +2911,7 @@ func (s *BgpServer) StartBgp(ctx context.Context, r *api.StartBgpRequest) error 
 		if err := s.policy.Initialize(); err != nil {
 			return err
 		}
+
 		s.bgpConfig.Global = *c
 		// update route selection options
 		table.SelectionOptions = c.RouteSelectionOptions.Config
@@ -2549,12 +2928,26 @@ func (s *BgpServer) ListVrf(ctx context.Context, r *api.ListVrfRequest, fn func(
 		d, _ := apiutil.MarshalRD(v.Rd)
 		irt, _ := apiutil.MarshalRTs(v.ImportRt.ToSlice())
 		ert, _ := apiutil.MarshalRTs(v.ExportRt)
+
+		// Find netlink import config for this VRF
+		netlinkImportEnabled := false
+		var netlinkImportInterfaces []string
+		for _, vrfConfig := range s.bgpConfig.Vrfs {
+			if vrfConfig.Config.Name == v.Name && vrfConfig.NetlinkImport.Enabled {
+				netlinkImportEnabled = true
+				netlinkImportInterfaces = vrfConfig.NetlinkImport.InterfaceList
+				break
+			}
+		}
+
 		return &api.Vrf{
-			Name:     v.Name,
-			Rd:       d,
-			Id:       v.Id,
-			ImportRt: irt,
-			ExportRt: ert,
+			Name:                    v.Name,
+			Rd:                      d,
+			Id:                      v.Id,
+			ImportRt:                irt,
+			ExportRt:                ert,
+			NetlinkImportEnabled:    netlinkImportEnabled,
+			NetlinkImportInterfaces: netlinkImportInterfaces,
 		}
 	}
 	var l []*api.Vrf
@@ -2620,6 +3013,24 @@ func (s *BgpServer) AddVrf(ctx context.Context, r *api.AddVrfRequest) error {
 				}
 			}
 		}
+
+		// Trigger netlink import rescan for newly added VRF
+		if s.netlinkClient != nil {
+			s.netlinkClient.rescan()
+		}
+
+		// Rebuild VRF export mappings for newly added VRF
+		if s.netlinkExportClient != nil {
+			if err := s.netlinkExportClient.buildVrfMappings(); err != nil {
+				s.logger.Warn("Failed to rebuild VRF export mappings after VRF add",
+					log.Fields{
+						"Topic": "netlink",
+						"VRF":   name,
+						"Error": err,
+					})
+			}
+		}
+
 		return nil
 	}, true)
 }
@@ -3244,6 +3655,18 @@ func (s *BgpServer) ListPeer(ctx context.Context, r *api.ListPeerRequest, fn fun
 							Advertised: advertised,
 						}
 					}
+				}
+			}
+			// Populate nexthop information from peerInfo
+			if peer.peerInfo != nil {
+				if peer.peerInfo.IPv4Nexthop != nil && len(peer.peerInfo.IPv4Nexthop) > 0 {
+					p.State.Ipv4Nexthop = peer.peerInfo.IPv4Nexthop.String()
+				}
+				if peer.peerInfo.IPv6Nexthop != nil && len(peer.peerInfo.IPv6Nexthop) > 0 {
+					p.State.Ipv6Nexthop = peer.peerInfo.IPv6Nexthop.String()
+				}
+				if peer.peerInfo.IPv6LinkLocalNexthop != nil && len(peer.peerInfo.IPv6LinkLocalNexthop) > 0 {
+					p.State.Ipv6LinkLocalNexthop = peer.peerInfo.IPv6LinkLocalNexthop.String()
 				}
 			}
 			l = append(l, p)
@@ -4452,6 +4875,8 @@ func toPathApiUtil(path *table.Path) *apiutil.Path {
 		p.PeerASN = s.AS
 		p.PeerID = s.ID
 		p.PeerAddress = s.Address
+		p.IsNetlink = s.IsNetlink
+		p.NetlinkIfName = s.NetlinkIfName
 	}
 	return p
 }
@@ -4609,6 +5034,10 @@ func (s *BgpServer) SetLogLevel(ctx context.Context, r *api.SetLogLevelRequest) 
 
 func (s *BgpServer) Log() log.Logger {
 	return s.logger
+}
+
+func (s *BgpServer) GetBgpConfig() *oc.Bgp {
+	return &s.bgpConfig
 }
 
 type watchEventType string

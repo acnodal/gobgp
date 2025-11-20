@@ -5,6 +5,9 @@
 *.pyc
 cmd/gobgp/gobgp
 cmd/gobgpd/gobgpd
+gobgp
+gobgpd
+
 
 # Folders
 _obj
@@ -32,3 +35,6 @@ test/scenario_test/nosetest*.xml
 # IDE workspace
 .idea
 .vscode
+
+# Misc
+*.bak

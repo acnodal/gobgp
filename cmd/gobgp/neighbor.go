@@ -288,6 +288,22 @@ func showNeighbor(args []string) error {
 	}
 	fmt.Printf("  BGP OutQ = %d, Flops = %d\n", p.State.Queues.Output, p.State.Flops)
 	fmt.Printf("  Local address is %s, local ASN: %s\n", p.Transport.LocalAddress, getLocalASN(p))
+
+	// Display nexthop information
+	nexthops := make([]string, 0, 3)
+	if p.State.Ipv4Nexthop != "" {
+		nexthops = append(nexthops, fmt.Sprintf("IPv4: %s", p.State.Ipv4Nexthop))
+	}
+	if p.State.Ipv6Nexthop != "" {
+		nexthops = append(nexthops, fmt.Sprintf("IPv6: %s", p.State.Ipv6Nexthop))
+	}
+	if p.State.Ipv6LinkLocalNexthop != "" {
+		nexthops = append(nexthops, fmt.Sprintf("IPv6 Link-Local: %s", p.State.Ipv6LinkLocalNexthop))
+	}
+	if len(nexthops) > 0 {
+		fmt.Printf("  Nexthops: %s\n", strings.Join(nexthops, ", "))
+	}
+
 	fmt.Printf("  Hold time is %d, keepalive interval is %d seconds\n", int(p.Timers.State.NegotiatedHoldTime), int(p.Timers.State.KeepaliveInterval))
 	fmt.Printf("  Configured hold time is %d, keepalive interval is %d seconds\n", int(p.Timers.Config.HoldTime), int(p.Timers.Config.KeepaliveInterval))
 
@@ -625,7 +641,9 @@ func makeShowRouteArgs(p *api.Path, idx int, now time.Time, showAge, showBest, s
 	attrs, _ := apiutil.GetNativePathAttributes(p)
 	// Next Hop
 	nexthop := "fictitious"
-	if n := getNextHopFromPathAttributes(attrs); n.IsValid() {
+	if p.IsNetlink {
+		nexthop = p.NetlinkIfName
+	} else if n := getNextHopFromPathAttributes(attrs); n.IsValid() {
 		nexthop = n.String()
 	}
 	args = append(args, nexthop)

@@ -18,9 +18,16 @@ package version
 import "fmt"
 
 const (
+	// Original GoBGP version this fork is based on
 	MAJOR uint = 3
 	MINOR uint = 37
 	PATCH uint = 0
+
+	// PureLB fork version
+	FORK_NAME  string = "PureLB-fork"
+	FORK_MAJOR uint   = 0
+	FORK_MINOR uint   = 1
+	FORK_PATCH uint   = 0
 )
 
 var (
@@ -30,25 +37,25 @@ var (
 )
 
 func Version() string {
-	suffix := ""
-	if len(IDENTIFIER) > 0 {
-		suffix = fmt.Sprintf("-%s", IDENTIFIER)
-	}
+	// Base fork version
+	baseVersion := fmt.Sprintf("%s:%02d.%02d.%02d", FORK_NAME, FORK_MAJOR, FORK_MINOR, FORK_PATCH)
 
-	if len(COMMIT) > 0 || len(METADATA) > 0 {
-		suffix = suffix + "+"
-	}
-
+	// Add commit if available
 	if len(COMMIT) > 0 {
-		suffix = fmt.Sprintf("%s"+"commit.%s", suffix, COMMIT)
-	}
-
-	if len(METADATA) > 0 {
-		if len(COMMIT) > 0 {
-			suffix = suffix + "."
+		if len(COMMIT) > 7 {
+			baseVersion = fmt.Sprintf("%s (commit: %s)", baseVersion, COMMIT[:7])
+		} else {
+			baseVersion = fmt.Sprintf("%s (commit: %s)", baseVersion, COMMIT)
 		}
-		suffix = suffix + METADATA
 	}
 
-	return fmt.Sprintf("%d.%d.%d%s", MAJOR, MINOR, PATCH, suffix)
+	// Add original GoBGP base version
+	baseVersion = fmt.Sprintf("%s [base: gobgp-%d.%d.%d]", baseVersion, MAJOR, MINOR, PATCH)
+
+	return baseVersion
+}
+
+// ShortVersion returns just the fork version without details
+func ShortVersion() string {
+	return fmt.Sprintf("%s:%02d.%02d.%02d", FORK_NAME, FORK_MAJOR, FORK_MINOR, FORK_PATCH)
 }

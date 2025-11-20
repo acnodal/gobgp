@@ -274,6 +274,8 @@ func updateNeighbors(ctx context.Context, bgpServer *server.BgpServer, updated [
 // obtained by calling ReadConfigFile. If graceful restart behavior is desired,
 // pass true for isGracefulRestart. Otherwise, pass false.
 func InitialConfig(ctx context.Context, bgpServer *server.BgpServer, newConfig *oc.BgpConfigSet, isGracefulRestart bool) (*oc.BgpConfigSet, error) {
+	bgpServer.Log().Debug("loaded full config", log.Fields{"Topic": "config", "Config": newConfig})
+	bgpServer.Log().Debug("loaded netlink config", log.Fields{"Topic": "config", "Netlink": newConfig.Netlink})
 	if err := bgpServer.StartBgp(ctx, &api.StartBgpRequest{
 		Global: oc.NewGlobalFromConfigStruct(&newConfig.Global),
 	}); err != nil {
@@ -297,6 +299,13 @@ func InitialConfig(ctx context.Context, bgpServer *server.BgpServer, newConfig *
 			bgpServer.Log().Fatal("failed to set zebra config",
 				log.Fields{"Topic": "config", "Error": err})
 		}
+	}
+
+	bgpServer.GetBgpConfig().Netlink = newConfig.Netlink
+	bgpServer.GetBgpConfig().Vrfs = newConfig.Vrfs
+	if err := bgpServer.StartNetlink(ctx); err != nil {
+		bgpServer.Log().Fatal("failed to start netlink",
+			log.Fields{"Topic": "config", "Error": err})
 	}
 
 	if len(newConfig.Collector.Config.Url) > 0 {
@@ -497,5 +506,17 @@ func UpdateConfig(ctx context.Context, bgpServer *server.BgpServer, c, newConfig
 				log.Fields{"Topic": "config", "Error": err})
 		}
 	}
+
+	// Update netlink configuration
+	if !newConfig.Netlink.Equal(&c.Netlink) {
+		bgpServer.Log().Info("netlink config changed, updating",
+			log.Fields{"Topic": "config"})
+		bgpServer.GetBgpConfig().Netlink = newConfig.Netlink
+		if err := bgpServer.StartNetlink(ctx); err != nil {
+			bgpServer.Log().Warn("failed to update netlink config",
+				log.Fields{"Topic": "config", "Error": err})
+		}
+	}
+
 	return newConfig, nil
 }

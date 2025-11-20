@@ -52,7 +52,6 @@ func getVrfs() ([]*api.Vrf, error) {
 }
 
 func showVrfs() error {
-	maxLens := []int{20, 20, 20, 20, 5}
 	vrfs, err := getVrfs()
 	if err != nil {
 		return err
@@ -68,6 +67,24 @@ func showVrfs() error {
 		}
 		return nil
 	}
+
+	// Check if any VRF has netlink import enabled
+	hasNetlinkImport := false
+	for _, v := range vrfs {
+		if v.NetlinkImportEnabled {
+			hasNetlinkImport = true
+			break
+		}
+	}
+
+	var maxLens []int
+	var format string
+	if hasNetlinkImport {
+		maxLens = []int{20, 20, 20, 20, 5, 30}
+	} else {
+		maxLens = []int{20, 20, 20, 20, 5}
+	}
+
 	lines := make([][]string, 0, len(vrfs))
 	for _, v := range vrfs {
 		name := v.Name
@@ -97,18 +114,42 @@ func showVrfs() error {
 		if err != nil {
 			return err
 		}
-		lines = append(lines, []string{name, rdStr, importRts, exportRts, fmt.Sprintf("%d", v.Id)})
 
-		for i, v := range []int{len(name), len(rdStr), len(importRts), len(exportRts)} {
-			if v > maxLens[i] {
-				maxLens[i] = v + 4
+		var line []string
+		if hasNetlinkImport {
+			netlinkImport := ""
+			if v.NetlinkImportEnabled {
+				netlinkImport = strings.Join(v.NetlinkImportInterfaces, ", ")
+			}
+			line = []string{name, rdStr, importRts, exportRts, fmt.Sprintf("%d", v.Id), netlinkImport}
+			for i, val := range []int{len(name), len(rdStr), len(importRts), len(exportRts), 0, len(netlinkImport)} {
+				if val > maxLens[i] {
+					maxLens[i] = val + 4
+				}
+			}
+		} else {
+			line = []string{name, rdStr, importRts, exportRts, fmt.Sprintf("%d", v.Id)}
+			for i, val := range []int{len(name), len(rdStr), len(importRts), len(exportRts)} {
+				if val > maxLens[i] {
+					maxLens[i] = val + 4
+				}
 			}
 		}
+		lines = append(lines, line)
 	}
-	format := fmt.Sprintf("  %%-%ds %%-%ds %%-%ds %%-%ds %%-%ds\n", maxLens[0], maxLens[1], maxLens[2], maxLens[3], maxLens[4])
-	fmt.Printf(format, "Name", "RD", "Import RT", "Export RT", "ID")
-	for _, l := range lines {
-		fmt.Printf(format, l[0], l[1], l[2], l[3], l[4])
+
+	if hasNetlinkImport {
+		format = fmt.Sprintf("  %%-%ds %%-%ds %%-%ds %%-%ds %%-%ds %%-%ds\n", maxLens[0], maxLens[1], maxLens[2], maxLens[3], maxLens[4], maxLens[5])
+		fmt.Printf(format, "Name", "RD", "Import RT", "Export RT", "ID", "Netlink Import")
+		for _, l := range lines {
+			fmt.Printf(format, l[0], l[1], l[2], l[3], l[4], l[5])
+		}
+	} else {
+		format = fmt.Sprintf("  %%-%ds %%-%ds %%-%ds %%-%ds %%-%ds\n", maxLens[0], maxLens[1], maxLens[2], maxLens[3], maxLens[4])
+		fmt.Printf(format, "Name", "RD", "Import RT", "Export RT", "ID")
+		for _, l := range lines {
+			fmt.Printf(format, l[0], l[1], l[2], l[3], l[4])
+		}
 	}
 	return nil
 }

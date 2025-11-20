@@ -314,7 +314,17 @@ func createMPReachMessage(path *Path) *bgp.BGPMessage {
 	attrs := make([]bgp.PathAttributeInterface, 0, len(oattrs))
 	for _, a := range oattrs {
 		if a.GetType() == bgp.BGP_ATTR_TYPE_MP_REACH_NLRI {
-			attr, _ := bgp.NewPathAttributeMpReachNLRI(path.GetFamily(), []bgp.AddrPrefixInterface{path.GetNlri()}, path.GetNexthop())
+			// Preserve the existing MP_REACH_NLRI attribute to retain link-local nexthop
+			mpreach := a.(*bgp.PathAttributeMpReachNLRI)
+			// Update only the NLRI to match current path's NLRI
+			attr := &bgp.PathAttributeMpReachNLRI{
+				PathAttribute:    mpreach.PathAttribute,
+				Nexthop:          mpreach.Nexthop,
+				LinkLocalNexthop: mpreach.LinkLocalNexthop,
+				AFI:              mpreach.AFI,
+				SAFI:             mpreach.SAFI,
+				Value:            []bgp.AddrPrefixInterface{path.GetNlri()},
+			}
 			attrs = append(attrs, attr)
 		} else {
 			attrs = append(attrs, a)

@@ -226,6 +226,8 @@ func toPathAPI(binNlri []byte, binPattrs [][]byte, anyNlri *api.NLRI, anyPattrs 
 		SendMaxFiltered: path.SendMaxFiltered,
 		Filtered:        path.Filtered,
 		Validation:      path.Validation,
+		IsNetlink:       path.IsNetlink,
+		NetlinkIfName:   path.NetlinkIfName,
 	}
 	if path.PeerID.IsValid() {
 		p.SourceId = path.PeerID.String()
@@ -263,7 +265,11 @@ func toPathApi(path *apiutil.Path, onlyBinary, nlriBinary, attributeBinary bool)
 			}
 		}
 	}
-	return toPathAPI(binNlri, binPattrs, anyNlri, anyPattrs, path)
+	p := toPathAPI(binNlri, binPattrs, anyNlri, anyPattrs, path)
+	if path.IsNetlink {
+		p.NeighborIp = path.PeerID.String()
+	}
+	return p
 }
 
 func getValidation(v map[*table.Path]*table.Validation, p *table.Path) *table.Validation {
@@ -788,6 +794,37 @@ func (s *server) ListRpkiTable(r *api.ListRpkiTableRequest, stream api.GoBgpServ
 
 func (s *server) EnableZebra(ctx context.Context, r *api.EnableZebraRequest) (*api.EnableZebraResponse, error) {
 	return &api.EnableZebraResponse{}, s.bgpServer.EnableZebra(ctx, r)
+}
+
+func (s *server) GetNetlink(ctx context.Context, r *api.GetNetlinkRequest) (*api.GetNetlinkResponse, error) {
+	return s.bgpServer.GetNetlink(ctx, r)
+}
+
+func (s *server) GetNetlinkImportStats(ctx context.Context, r *api.GetNetlinkImportStatsRequest) (*api.GetNetlinkImportStatsResponse, error) {
+	return s.bgpServer.GetNetlinkImportStats(ctx, r)
+}
+
+func (s *server) ListNetlinkExport(r *api.ListNetlinkExportRequest, stream api.GoBgpService_ListNetlinkExportServer) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fn := func(rsp *api.ListNetlinkExportResponse) {
+		if err := stream.Send(rsp); err != nil {
+			cancel()
+		}
+	}
+	return s.bgpServer.ListNetlinkExport(ctx, r, fn)
+}
+
+func (s *server) GetNetlinkExportStats(ctx context.Context, r *api.GetNetlinkExportStatsRequest) (*api.GetNetlinkExportStatsResponse, error) {
+	return s.bgpServer.GetNetlinkExportStats(ctx, r)
+}
+
+func (s *server) FlushNetlinkExport(ctx context.Context, r *api.FlushNetlinkExportRequest) (*api.FlushNetlinkExportResponse, error) {
+	return s.bgpServer.FlushNetlinkExport(ctx, r)
+}
+
+func (s *server) ListNetlinkExportRules(ctx context.Context, r *api.ListNetlinkExportRulesRequest) (*api.ListNetlinkExportRulesResponse, error) {
+	return s.bgpServer.ListNetlinkExportRules(ctx, r)
 }
 
 func (s *server) ListVrf(r *api.ListVrfRequest, stream api.GoBgpService_ListVrfServer) error {

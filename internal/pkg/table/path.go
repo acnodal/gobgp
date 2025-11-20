@@ -242,15 +242,8 @@ func UpdatePathAttrs(logger log.Logger, global *oc.Global, peer *oc.Neighbor, in
 		}
 	}
 
-	localAddress := info.LocalAddress
-	nexthop := path.GetNexthop()
 	switch peer.State.PeerType {
 	case oc.PEER_TYPE_EXTERNAL:
-		// NEXTHOP handling
-		if !path.IsLocal() || nexthop.IsUnspecified() {
-			path.SetNexthop(localAddress.AsSlice())
-		}
-
 		// remove-private-as handling
 		path.RemovePrivateAS(peer.Config.LocalAs, peer.State.RemovePrivateAs)
 
@@ -265,15 +258,87 @@ func UpdatePathAttrs(logger log.Logger, global *oc.Global, peer *oc.Neighbor, in
 		if med := path.getPathAttr(bgp.BGP_ATTR_TYPE_MULTI_EXIT_DISC); med != nil && !path.IsLocal() {
 			path.delPathAttr(bgp.BGP_ATTR_TYPE_MULTI_EXIT_DISC)
 		}
-	case oc.PEER_TYPE_INTERNAL:
-		// NEXTHOP handling for iBGP
-		// if the path generated locally set local address as nexthop.
-		// if not, don't modify it.
-		// TODO: NEXT-HOP-SELF support
-		if path.IsLocal() && nexthop.IsUnspecified() {
-			path.SetNexthop(localAddress.AsSlice())
+
+		// Nexthop handling for eBGP - always set nexthop-self
+		family := path.GetFamily()
+
+		// For netlink routes, use interface addresses (includes link-local for IPv6)
+		if path.GetSource().IsNetlink {
+			if family.Afi() == bgp.AFI_IP6 {
+				if info.IPv6Nexthop != nil && !info.IPv6Nexthop.IsUnspecified() {
+					nexthops := []net.IP{info.IPv6Nexthop}
+					if info.IPv6LinkLocalNexthop != nil && !info.IPv6LinkLocalNexthop.IsUnspecified() {
+						nexthops = append(nexthops, info.IPv6LinkLocalNexthop)
+					}
+					path.SetNexthops(nexthops)
+				} else {
+					logger.Warn("could not determine a valid IPv6 nexthop for netlink-originated route",
+						log.Fields{
+							"Topic":  "Peer",
+							"Key":    peer.State.NeighborAddress,
+							"Prefix": path.GetPrefix(),
+						})
+				}
+			} else {
+				if info.IPv4Nexthop != nil && !info.IPv4Nexthop.IsUnspecified() {
+					path.SetNexthop(info.IPv4Nexthop)
+				} else {
+					logger.Warn("could not determine a valid IPv4 nexthop for netlink-originated route",
+						log.Fields{
+							"Topic":  "Peer",
+							"Key":    peer.State.NeighborAddress,
+							"Prefix": path.GetPrefix(),
+						})
+				}
+			}
+		} else {
+			// For non-netlink routes, set nexthop-self (standard eBGP behavior)
+			if family.Afi() == bgp.AFI_IP6 {
+				if info.IPv6Nexthop != nil && !info.IPv6Nexthop.IsUnspecified() {
+					// For IPv6, only use global address (not link-local) for non-netlink routes
+					path.SetNexthop(info.IPv6Nexthop)
+				}
+			} else {
+				if info.IPv4Nexthop != nil && !info.IPv4Nexthop.IsUnspecified() {
+					path.SetNexthop(info.IPv4Nexthop)
+				}
+			}
 		}
 
+	case oc.PEER_TYPE_INTERNAL:
+		// Only set nexthop for netlink-originated routes
+		// For other routes, let normal iBGP nexthop processing and policy apply
+		if path.GetSource().IsNetlink {
+			family := path.GetFamily()
+			if family.Afi() == bgp.AFI_IP6 {
+				if info.IPv6Nexthop != nil && !info.IPv6Nexthop.IsUnspecified() {
+					nexthops := []net.IP{info.IPv6Nexthop}
+					if info.IPv6LinkLocalNexthop != nil && !info.IPv6LinkLocalNexthop.IsUnspecified() {
+						nexthops = append(nexthops, info.IPv6LinkLocalNexthop)
+					}
+					path.SetNexthops(nexthops)
+				} else {
+					logger.Warn("could not determine a valid IPv6 nexthop for netlink-originated route",
+						log.Fields{
+							"Topic":  "Peer",
+							"Key":    peer.State.NeighborAddress,
+							"Prefix": path.GetPrefix(),
+						})
+				}
+			} else {
+				if info.IPv4Nexthop != nil && !info.IPv4Nexthop.IsUnspecified() {
+					path.SetNexthop(info.IPv4Nexthop)
+				} else {
+					logger.Warn("could not determine a valid IPv4 nexthop for netlink-originated route",
+						log.Fields{
+							"Topic":  "Peer",
+							"Key":    peer.State.NeighborAddress,
+							"Prefix": path.GetPrefix(),
+						})
+				}
+			}
+		}
+		// For non-netlink iBGP routes, nexthop is preserved (standard iBGP behavior)
 		// AS_PATH handling for iBGP
 		// if the path has AS_PATH path attribute, don't modify it.
 		// if not, attach *empty* AS_PATH path attribute.
@@ -290,7 +355,6 @@ func UpdatePathAttrs(logger log.Logger, global *oc.Global, peer *oc.Neighbor, in
 
 		// RFC4456: BGP Route Reflection
 		// 8. Avoiding Routing Information Loops
-		info := path.GetSource()
 		if peer.RouteReflector.Config.RouteReflectorClient {
 			// This attribute will carry the BGP Identifier of the originator of the route in the local AS.
 			// A BGP speaker SHOULD NOT create an ORIGINATOR_ID attribute if one already exists.
@@ -301,7 +365,7 @@ func UpdatePathAttrs(logger log.Logger, global *oc.Global, peer *oc.Neighbor, in
 			// advertiser, and the Next-hop attribute shall be set of the local
 			// address for that session.
 			if path.GetFamily() == bgp.RF_RTC_UC {
-				path.SetNexthop(localAddress.AsSlice())
+				path.SetNexthop(info.LocalAddress.AsSlice())
 				path.setPathAttr(bgp.NewPathAttributeOriginatorId(info.LocalID.String()))
 			} else if path.getPathAttr(bgp.BGP_ATTR_TYPE_ORIGINATOR_ID) == nil {
 				if path.IsLocal() {
@@ -332,6 +396,13 @@ func UpdatePathAttrs(logger log.Logger, global *oc.Global, peer *oc.Neighbor, in
 				"Type":  peer.State.PeerType,
 			})
 	}
+	logger.Debug("UpdatePathAttrs",
+		log.Fields{
+			"Topic":   "Peer",
+			"Key":     peer.State.NeighborAddress,
+			"Path":    path,
+			"Nexthop": path.GetNexthop(),
+		})
 	return path
 }
 
@@ -456,9 +527,23 @@ func (path *Path) GetNexthop() netip.Addr {
 }
 
 func (path *Path) SetNexthop(nexthop net.IP) {
+	path.SetNexthops([]net.IP{nexthop})
+}
+
+func (path *Path) SetNexthops(nexthops []net.IP) {
+	if len(nexthops) == 0 {
+		return
+	}
+
+	nexthop := nexthops[0]
+	var linkLocalNexthop net.IP
+	if len(nexthops) > 1 {
+		linkLocalNexthop = nexthops[1]
+	}
+
 	if path.GetFamily() == bgp.RF_IPv4_UC && nexthop.To4() == nil {
 		path.delPathAttr(bgp.BGP_ATTR_TYPE_NEXT_HOP)
-		mpreach, _ := bgp.NewPathAttributeMpReachNLRI(path.GetFamily(), []bgp.AddrPrefixInterface{path.GetNlri()}, netip.MustParseAddr(nexthop.String()))
+		mpreach, _ := bgp.NewPathAttributeMpReachNLRIwithNexthops(path.GetFamily(), []bgp.AddrPrefixInterface{path.GetNlri()}, nexthop, linkLocalNexthop)
 		path.setPathAttr(mpreach)
 		return
 	}
@@ -469,10 +554,11 @@ func (path *Path) SetNexthop(nexthop net.IP) {
 	attr = path.getPathAttr(bgp.BGP_ATTR_TYPE_MP_REACH_NLRI)
 	if attr != nil {
 		oldNlri := attr.(*bgp.PathAttributeMpReachNLRI)
-		mpreach, _ := bgp.NewPathAttributeMpReachNLRI(path.GetFamily(), oldNlri.Value, netip.MustParseAddr(nexthop.String()))
+		mpreach, _ := bgp.NewPathAttributeMpReachNLRIwithNexthops(path.GetFamily(), oldNlri.Value, nexthop, linkLocalNexthop)
 		path.setPathAttr(mpreach)
 	}
 }
+
 
 func (path *Path) GetNlri() bgp.AddrPrefixInterface {
 	return path.OriginInfo().nlri
@@ -1097,7 +1183,12 @@ func (path *Path) MarshalJSON() ([]byte, error) {
 		SourceID:   path.GetSource().ID.AsSlice(),
 		NeighborIP: path.GetSource().Address.AsSlice(),
 		Stale:      path.IsStale(),
-		ID:         path.GetNlri().PathIdentifier(),
+		ID: func() uint32 {
+			if path.GetNlri() == nil {
+				return 0
+			}
+			return path.GetNlri().PathIdentifier()
+		}(),
 	})
 }
 

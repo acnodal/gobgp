@@ -153,14 +153,22 @@ func (n *Neighbor) GetAfiSafi(family bgp.Family) *AfiSafi {
 }
 
 func (n *Neighbor) ExtractNeighborAddress() (string, error) {
-	addr := n.State.NeighborAddress
-	if addr == "" {
-		addr = n.Config.NeighborAddress
-		if addr == "" {
-			return "", fmt.Errorf("NeighborAddress is not configured")
-		}
+	if addr := n.Config.NeighborAddress; addr != "" {
+		return addr, nil
 	}
-	return addr, nil
+	if intf := n.Config.NeighborInterface; intf != "" {
+		// For IPv4, this is not implemented and will return error.
+		addr, err := GetIPv6LinkLocalNeighborAddress(intf)
+		if err != nil {
+			return "", err
+		}
+		if addr == "" {
+			return intf, nil
+		}
+		n.State.NeighborAddress = addr
+		return addr, nil
+	}
+	return "", fmt.Errorf("no neighbor address/interface specified")
 }
 
 func (n *Neighbor) IsAddPathReceiveEnabled(family bgp.Family) bool {

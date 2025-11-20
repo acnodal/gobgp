@@ -1,0 +1,35 @@
+[global.config]
+  as = 64551
+  router-id = "192.168.151.100"
+
+[[neighbors]]
+  [neighbors.config]
+    neighbor-address = "192.168.151.161"
+    peer-as = "65413"
+  [[neighbors.afi-safis]]
+    [neighbors.afi-safis.config]
+       afi-safi-name = "ipv4-unicast"  
+  [[neighbors.afi-safis]]
+    [neighbors.afi-safis.config]
+       afi-safi-name = "ipv6-unicast"
+
+[[neighbors]]
+  [neighbors.config]
+    neighbor-address = "192.168.151.101"
+    peer-as = "64553"
+  [[neighbors.afi-safis]]
+    [neighbors.afi-safis.config]
+       afi-safi-name = "ipv4-unicast"
+  [[neighbors.afi-safis]]
+    [neighbors.afi-safis.config]
+       afi-safi-name = "ipv6-unicast"
+
+
+
+[netlink]
+  [netlink.import]
+    enabled = true
+    interface-list = ["kubelb0"]
+
+
+    

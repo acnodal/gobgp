@@ -46,10 +46,8 @@ func GetIPv6LinkLocalNeighborAddress(ifname string) (string, error) {
 		}
 	}
 
-	if cnt == 0 {
-		return "", fmt.Errorf("no ipv6 link-local neighbor found")
-	} else if cnt > 1 {
-		return "", fmt.Errorf("found %d link-local neighbors. only support p2p link", cnt)
+	if cnt != 1 {
+		return "", nil
 	}
 
 	return fmt.Sprintf("%s%%%s", addr, ifname), nil
