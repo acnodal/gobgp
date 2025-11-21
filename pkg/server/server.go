@@ -3448,13 +3448,13 @@ func (s *BgpServer) ListPeer(ctx context.Context, r *api.ListPeerRequest, fn fun
 			}
 			// Populate nexthop information from peerInfo
 			if peer.peerInfo != nil {
-				if peer.peerInfo.IPv4Nexthop != nil && len(peer.peerInfo.IPv4Nexthop) > 0 {
+				if len(peer.peerInfo.IPv4Nexthop) > 0 {
 					p.State.Ipv4Nexthop = peer.peerInfo.IPv4Nexthop.String()
 				}
-				if peer.peerInfo.IPv6Nexthop != nil && len(peer.peerInfo.IPv6Nexthop) > 0 {
+				if len(peer.peerInfo.IPv6Nexthop) > 0 {
 					p.State.Ipv6Nexthop = peer.peerInfo.IPv6Nexthop.String()
 				}
-				if peer.peerInfo.IPv6LinkLocalNexthop != nil && len(peer.peerInfo.IPv6LinkLocalNexthop) > 0 {
+				if len(peer.peerInfo.IPv6LinkLocalNexthop) > 0 {
 					p.State.Ipv6LinkLocalNexthop = peer.peerInfo.IPv6LinkLocalNexthop.String()
 				}
 			}

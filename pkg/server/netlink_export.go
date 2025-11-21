@@ -44,19 +44,19 @@ const (
 // exportRule defines a rule for exporting BGP routes to Linux routing tables
 type exportRule struct {
 	Name             string
-	Communities      []uint32                // Standard communities (32-bit)
-	LargeCommunities []*bgp.LargeCommunity  // Large communities (96-bit)
-	VrfName          string                  // VRF name (empty = global table)
-	TableId          int                     // Linux routing table ID
-	Metric           uint32                  // Route metric
-	ValidateNexthop  bool                    // Validate nexthop reachability (default: true)
+	Communities      []uint32              // Standard communities (32-bit)
+	LargeCommunities []*bgp.LargeCommunity // Large communities (96-bit)
+	VrfName          string                // VRF name (empty = global table)
+	TableId          int                   // Linux routing table ID
+	Metric           uint32                // Route metric
+	ValidateNexthop  bool                  // Validate nexthop reachability (default: true)
 }
 
 // exportedRouteInfo tracks metadata about an exported route
 type exportedRouteInfo struct {
-	Route      *go_netlink.Route  // The Linux route that was installed
-	RuleName   string              // Which export rule matched
-	ExportedAt time.Time           // When the route was exported
+	Route      *go_netlink.Route // The Linux route that was installed
+	RuleName   string            // Which export rule matched
+	ExportedAt time.Time         // When the route was exported
 }
 
 // dampenEntry tracks pending route updates for dampening
@@ -82,12 +82,12 @@ type exportStats struct {
 
 // vrfExportConfig holds per-VRF export configuration
 type vrfExportConfig struct {
-	VrfName            string   // GoBGP VRF name
-	LinuxVrf           string   // Target Linux VRF name (default: same as VrfName)
-	LinuxTableId       int      // Target Linux table ID (0 = auto-lookup)
-	Metric             uint32   // Route metric
-	ValidateNexthop    bool     // Validate nexthop reachability
-	CommunityList      []uint32 // Standard communities (parsed)
+	VrfName            string                // GoBGP VRF name
+	LinuxVrf           string                // Target Linux VRF name (default: same as VrfName)
+	LinuxTableId       int                   // Target Linux table ID (0 = auto-lookup)
+	Metric             uint32                // Route metric
+	ValidateNexthop    bool                  // Validate nexthop reachability
+	CommunityList      []uint32              // Standard communities (parsed)
 	LargeCommunityList []*bgp.LargeCommunity // Large communities (parsed)
 }
 
@@ -101,7 +101,7 @@ type netlinkExportClient struct {
 	mu       sync.RWMutex
 
 	// VRF export mapping
-	rdToVrf  map[string]string // RD string -> VRF name
+	rdToVrf  map[string]string           // RD string -> VRF name
 	vrfRules map[string]*vrfExportConfig // VRF name -> export config
 
 	// Dampening
@@ -110,7 +110,7 @@ type netlinkExportClient struct {
 	dampenMu          sync.Mutex
 
 	// Statistics
-	stats exportStats
+	stats   exportStats
 	statsMu sync.RWMutex
 
 	// Route protocol
@@ -1016,7 +1016,13 @@ func (e *netlinkExportClient) processVrfExport(path *table.Path) {
 		slog.String("VRF", vrfName),
 		slog.Bool("ValidateNexthop", rule.ValidateNexthop))
 
-	e.exportRoute(path, rule)
+	if err := e.exportRoute(path, rule); err != nil {
+		e.logger.Warn("Failed to export route to VRF",
+			slog.String("Topic", "netlink"),
+			slog.String("Prefix", prefix),
+			slog.String("VRF", vrfName),
+			slog.Any("Error", err))
+	}
 }
 
 // matchesVrfExportFilters checks if a path matches VRF export community filters
@@ -1097,18 +1103,16 @@ func (e *netlinkExportClient) getRules() []*exportRule {
 	for i, rule := range e.rules {
 		// Copy the rule
 		ruleCopy := &exportRule{
-			Name:            rule.Name,
-			Communities:     make([]uint32, len(rule.Communities)),
+			Name:             rule.Name,
+			Communities:      make([]uint32, len(rule.Communities)),
 			LargeCommunities: make([]*bgp.LargeCommunity, len(rule.LargeCommunities)),
-			VrfName:         rule.VrfName,
-			TableId:         rule.TableId,
-			Metric:          rule.Metric,
-			ValidateNexthop: rule.ValidateNexthop,
+			VrfName:          rule.VrfName,
+			TableId:          rule.TableId,
+			Metric:           rule.Metric,
+			ValidateNexthop:  rule.ValidateNexthop,
 		}
 		copy(ruleCopy.Communities, rule.Communities)
-		for j, lcomm := range rule.LargeCommunities {
-			ruleCopy.LargeCommunities[j] = lcomm
-		}
+		copy(ruleCopy.LargeCommunities, rule.LargeCommunities)
 		result[i] = ruleCopy
 	}
 	return result
@@ -1132,9 +1136,7 @@ func (e *netlinkExportClient) getVrfRules() map[string]*vrfExportConfig {
 			LargeCommunityList: make([]*bgp.LargeCommunity, len(rule.LargeCommunityList)),
 		}
 		copy(ruleCopy.CommunityList, rule.CommunityList)
-		for i, lcomm := range rule.LargeCommunityList {
-			ruleCopy.LargeCommunityList[i] = lcomm
-		}
+		copy(ruleCopy.LargeCommunityList, rule.LargeCommunityList)
 		result[vrfName] = ruleCopy
 	}
 	return result
