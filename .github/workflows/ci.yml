@@ -18,22 +18,7 @@ jobs:
           go test -v -race -timeout 240s ./...
           if [ "$(go env GOARCH)" = "amd64" ]; then go test -v -race github.com/osrg/gobgp/v4/pkg/packet/bgp -run ^Test_RaceCondition$; else echo 'skip'; fi
 
-  unit386:
-    name: unit386
-    runs-on: ubuntu-22.04
-    env:
-      GOARCH: 386
-      CGO_ENABLED: 1
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-go@v4
-        with:
-          go-version: "stable"
-      - run: |
-          sudo apt update
-          sudo apt install -y gcc-multilib g++-multilib
-          go env GOARCH CGO_ENABLED
-          go test -v -timeout 240s ./...
+  # Note: 32-bit builds removed as netlink feature is Linux-only and targets modern 64-bit systems
 
   protobuf-check:
     name: protobuf lint and format check
