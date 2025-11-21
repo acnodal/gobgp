@@ -29,9 +29,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEST_DIR="/tmp/gobgp-test-$$"
 mkdir -p "$TEST_DIR"
 
-# Binaries
-GOBGPD="$SCRIPT_DIR/gobgpd"
-GOBGP="$SCRIPT_DIR/gobgp"
+# Binaries (look in repository root, two directories up from script location)
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+GOBGPD="$REPO_ROOT/gobgpd"
+GOBGP="$REPO_ROOT/gobgp"
 
 # Test configuration
 AS_NUMBER=64512
