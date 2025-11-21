@@ -53,3 +53,6 @@ uptime
 vpls
 zapi
 buflen
+linux
+netlink
+onlink

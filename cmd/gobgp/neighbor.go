@@ -1575,7 +1575,8 @@ func newNeighborCmd() *cobra.Command {
 	neighborCmdImpl.AddCommand(policyCmd)
 
 	neighborCmd := &cobra.Command{
-		Use: cmdNeighbor,
+		Use:     cmdNeighbor,
+		Aliases: []string{"n"},
 		Run: func(cmd *cobra.Command, args []string) {
 			var err error
 			if len(args) == 0 {
