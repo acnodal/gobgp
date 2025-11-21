@@ -29,10 +29,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEST_DIR="/tmp/gobgp-test-$$"
 mkdir -p "$TEST_DIR"
 
-# Binaries (look in repository root, two directories up from script location)
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-GOBGPD="$REPO_ROOT/gobgpd"
-GOBGP="$REPO_ROOT/gobgp"
+# Binaries - check if running in container or host
+if [ -f "/go/bin/gobgpd" ]; then
+    # Running in container
+    GOBGPD="/go/bin/gobgpd"
+    GOBGP="/go/bin/gobgp"
+else
+    # Running on host - look in repository root
+    REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+    GOBGPD="$REPO_ROOT/gobgpd"
+    GOBGP="$REPO_ROOT/gobgp"
+fi
 
 # Test configuration
 AS_NUMBER=64512

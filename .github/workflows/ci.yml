@@ -532,14 +532,15 @@ jobs:
   netlink:
     name: netlink
     runs-on: ubuntu-22.04
+    needs: build
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-go@v4
-        with:
-          go-version: "stable"
-      - name: Build GoBGP binaries
+      - uses: actions/download-artifact@v4
+      - name: test
         run: |
-          CGO_ENABLED=0 go build -o gobgpd ./cmd/gobgpd
-          CGO_ENABLED=0 go build -o gobgp ./cmd/gobgp
-      - name: Run netlink tests
-        run: sudo ./test/scenario_test/netlink_test.sh
+          docker load < artifact/gobgp.tar
+          # Run test in privileged container with VRF support
+          docker run --rm --privileged \
+            -v $(pwd)/test:/test \
+            gobgp \
+            bash -c "cd /gobgp && /test/scenario_test/netlink_test.sh"
