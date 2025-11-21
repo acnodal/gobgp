@@ -541,6 +541,7 @@ jobs:
           docker load < artifact/gobgp.tar
           # Run test in privileged container with VRF support
           docker run --rm --privileged \
+            --entrypoint /bin/bash \
             -v $(pwd)/test:/test \
             gobgp \
-            bash -c "cd /gobgp && /test/scenario_test/netlink_test.sh"
+            -c "/test/scenario_test/netlink_test.sh"
