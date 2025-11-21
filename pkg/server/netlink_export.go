@@ -1,6 +1,6 @@
 //go:build linux
 
-// Copyright (C) 2025 The GoBGP Authors.
+// Copyright (C) 2025 Acnodal Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.

@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/purelb/gobgp-netlink/actions/workflows/ci.yml/badge.svg)](https://github.com/purelb/gobgp-netlink/actions/workflows/ci.yml)
 [![Releases](https://img.shields.io/github/release/purelb/gobgp-netlink/all.svg?style=flat-square)](https://github.com/purelb/gobgp-netlink/releases)
-[![LICENSE](https://img.shields.io/github/license/purelb/gobgp-netlink.svg?style=flat-square)](https://github.com/purelb/gobgp-netlink/blob/master/LICENSE)
+[![LICENSE](https://img.shields.io/github/license/purelb/gobgp-netlink.svg?style=flat-square)](https://github.com/purelb/gobgp-netlink/blob/main/LICENSE)
 
 GoBGP-Netlink is an open source Border Gateway Protocol (BGP) implementation designed from scratch for
 modern environment and implemented in a modern programming language,
@@ -75,5 +75,5 @@ code contributing.
 ## Licensing
 
 GoBGP is licensed under the Apache License, Version 2.0. See
-[LICENSE](https://github.com/purelb/gobgp-netlink/blob/master/LICENSE) for the full
+[LICENSE](https://github.com/purelb/gobgp-netlink/blob/main/LICENSE) for the full
 license text.
