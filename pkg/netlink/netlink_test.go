@@ -30,7 +30,6 @@ type mockNetlinkManager struct {
 	routes        []netlink.Route
 	added         *netlink.Route
 	link          netlink.Link
-	linkErr       error
 	routeErr      error
 	addErr        error
 	linkbynameErr error

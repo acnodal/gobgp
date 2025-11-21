@@ -36,9 +36,6 @@ const (
 
 	// Default dampening interval to prevent flapping
 	defaultDampeningInterval = 100 * time.Millisecond
-
-	// Default metric for exported routes
-	defaultMetric = 20
 )
 
 // exportRule defines a rule for exporting BGP routes to Linux routing tables
@@ -118,7 +115,6 @@ type netlinkExportClient struct {
 
 	// Shutdown
 	stopCh chan struct{}
-	wg     sync.WaitGroup
 }
 
 // newNetlinkExportClient creates a new netlink export client
@@ -244,13 +240,6 @@ func (e *netlinkExportClient) cleanupStaleRoutes() error {
 	}
 
 	return nil
-}
-
-// addRule adds an export rule to the client
-func (e *netlinkExportClient) addRule(rule *exportRule) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.rules = append(e.rules, rule)
 }
 
 // setRules replaces all rules with a new set (for dynamic reconfiguration)
@@ -479,15 +468,6 @@ func (e *netlinkExportClient) reEvaluateAllRoutes(pathList []*table.Path) {
 
 	e.logger.Info("Route re-evaluation complete",
 		slog.String("Topic", "netlink"))
-}
-
-// close shuts down the export client
-func (e *netlinkExportClient) close() {
-	close(e.stopCh)
-	e.wg.Wait()
-	if e.client != nil {
-		e.client.Close()
-	}
 }
 
 // matchesRule checks if a path matches an export rule's community filters
