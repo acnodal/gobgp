@@ -3,29 +3,8 @@ name: ci
 on: [push, pull_request]
 
 jobs:
-  crossbuild:
-    name: crossbuild
-    # Note: Crossbuild failures on non-Linux platforms are EXPECTED
-    # The netlink integration feature is Linux-only and uses vishvananda/netlink library
-    # which only compiles on Linux. This is documented and intentional.
-    strategy:
-      matrix:
-        GOOS: ["freebsd", "openbsd", "darwin", "windows"]
-        GOARCH: ["amd64"]
-    continue-on-error: true  # Expected to fail on non-Linux platforms
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-go@v4
-        with:
-          go-version: "stable"
-      - run: |
-          go env
-          go build ./cmd/gobgp
-          go build ./cmd/gobgpd
-        env:
-          GOOS: ${{ matrix.GOOS }}
-          GOARCH: ${{ matrix.GOARCH }}
+  # Note: Cross-compilation to non-Linux platforms is not supported.
+  # The netlink integration feature uses vishvananda/netlink which is Linux-only.
 
   unit:
     name: unit

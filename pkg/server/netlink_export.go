@@ -1,3 +1,5 @@
+//go:build linux
+
 // Copyright (C) 2025 The GoBGP Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
