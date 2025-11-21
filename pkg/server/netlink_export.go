@@ -403,7 +403,12 @@ func (e *netlinkExportClient) reEvaluateAllRoutes(pathList []*table.Path) {
 				shouldExport[vrfName][prefix] = true
 
 				// Export the route (idempotency check inside exportRoute will prevent duplicates)
-				e.exportRoute(path, rule)
+				if err := e.exportRoute(path, rule); err != nil {
+					e.logger.Warn("Failed to export route",
+						slog.String("Topic", "netlink"),
+						slog.String("Prefix", prefix),
+						slog.Any("Error", err))
+				}
 			}
 		}
 	}
@@ -901,7 +906,13 @@ func (e *netlinkExportClient) processUpdate(path *table.Path) {
 			slog.Any("VRFs", vrfsToWithdraw))
 
 		for _, vrfName := range vrfsToWithdraw {
-			e.withdrawRoute(path, vrfName)
+			if err := e.withdrawRoute(path, vrfName); err != nil {
+				e.logger.Warn("Failed to withdraw route",
+					slog.String("Topic", "netlink"),
+					slog.String("Prefix", prefix),
+					slog.String("VRF", vrfName),
+					slog.Any("Error", err))
+			}
 		}
 		return
 	}
@@ -937,7 +948,13 @@ func (e *netlinkExportClient) processUpdate(path *table.Path) {
 				slog.String("Rule", rule.Name),
 				slog.Bool("Matches", matches))
 			if matches {
-				e.exportRoute(path, rule)
+				if err := e.exportRoute(path, rule); err != nil {
+					e.logger.Warn("Failed to export route",
+						slog.String("Topic", "netlink"),
+						slog.String("Prefix", prefix),
+						slog.String("Rule", rule.Name),
+						slog.Any("Error", err))
+				}
 			}
 		}
 	}

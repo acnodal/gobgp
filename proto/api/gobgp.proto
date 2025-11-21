@@ -115,20 +115,19 @@ service GoBgpService {
   rpc SetLogLevel(SetLogLevelRequest) returns (SetLogLevelResponse);
 }
 
-message GetNetlinkRequest {
-}
+message GetNetlinkRequest {}
 
 message NetlinkVrfImport {
-	string vrf_name = 1;
-	repeated string interfaces = 2;
+  string vrf_name = 1;
+  repeated string interfaces = 2;
 }
 
 message GetNetlinkResponse {
-	bool import_enabled = 1;
-	bool export_enabled = 2;
-	string vrf = 3;
-	repeated string interfaces = 4;
-	repeated NetlinkVrfImport vrf_imports = 5;
+  bool import_enabled = 1;
+  bool export_enabled = 2;
+  string vrf = 3;
+  repeated string interfaces = 4;
+  repeated NetlinkVrfImport vrf_imports = 5;
 }
 
 message StartBgpRequest {
@@ -589,48 +588,46 @@ message EnableZebraRequest {
 
 message EnableZebraResponse {}
 
-
-
 message EnableNetlinkRequest {
-	string vrf = 1;
-	repeated string interfaces = 2;
-	string community = 3;
-	repeated string community_list = 4;
-	repeated string large_community_list = 5;
+  string vrf = 1;
+  repeated string interfaces = 2;
+  string community = 3;
+  repeated string community_list = 4;
+  repeated string large_community_list = 5;
 }
- 
+
 message EnableNetlinkResponse {}
 
 message ListNetlinkExportRequest {
-	string vrf = 1; // Filter by VRF name (empty = all VRFs)
+  string vrf = 1; // Filter by VRF name (empty = all VRFs)
 }
 
 message ListNetlinkExportResponse {
-	message ExportedRoute {
-		string prefix = 1;
-		string nexthop = 2;
-		string vrf = 3;
-		int32 table_id = 4;
-		uint32 metric = 5;
-		string rule_name = 6;
-		int64 exported_at = 7; // Unix timestamp
-	}
-	ExportedRoute route = 1;
+  message ExportedRoute {
+    string prefix = 1;
+    string nexthop = 2;
+    string vrf = 3;
+    int32 table_id = 4;
+    uint32 metric = 5;
+    string rule_name = 6;
+    int64 exported_at = 7; // Unix timestamp
+  }
+  ExportedRoute route = 1;
 }
 
 message GetNetlinkExportStatsRequest {}
 
 message GetNetlinkExportStatsResponse {
-	uint64 exported = 1;
-	uint64 withdrawn = 2;
-	uint64 errors = 3;
-	uint64 nexthop_validation_attempts = 4;
-	uint64 nexthop_validation_failures = 5;
-	uint64 dampened_updates = 6;
-	int64 last_export_time = 7; // Unix timestamp
-	int64 last_withdraw_time = 8; // Unix timestamp
-	int64 last_error_time = 9; // Unix timestamp
-	string last_error_msg = 10;
+  uint64 exported = 1;
+  uint64 withdrawn = 2;
+  uint64 errors = 3;
+  uint64 nexthop_validation_attempts = 4;
+  uint64 nexthop_validation_failures = 5;
+  uint64 dampened_updates = 6;
+  int64 last_export_time = 7; // Unix timestamp
+  int64 last_withdraw_time = 8; // Unix timestamp
+  int64 last_error_time = 9; // Unix timestamp
+  string last_error_msg = 10;
 }
 
 message FlushNetlinkExportRequest {}
@@ -640,38 +637,38 @@ message FlushNetlinkExportResponse {}
 message ListNetlinkExportRulesRequest {}
 
 message ListNetlinkExportRulesResponse {
-	message ExportRule {
-		string name = 1;
-		repeated string community_list = 2;
-		repeated string large_community_list = 3;
-		string vrf = 4;
-		int32 table_id = 5;
-		uint32 metric = 6;
-		bool validate_nexthop = 7;
-	}
-	message VrfExportRule {
-		string gobgp_vrf = 1;              // GoBGP VRF name
-		string linux_vrf = 2;              // Target Linux VRF name
-		int32 linux_table_id = 3;          // Target Linux table ID
-		uint32 metric = 4;
-		bool validate_nexthop = 5;
-		repeated string community_list = 6;
-		repeated string large_community_list = 7;
-	}
-	repeated ExportRule rules = 1;
-	repeated VrfExportRule vrf_rules = 2;
+  message ExportRule {
+    string name = 1;
+    repeated string community_list = 2;
+    repeated string large_community_list = 3;
+    string vrf = 4;
+    int32 table_id = 5;
+    uint32 metric = 6;
+    bool validate_nexthop = 7;
+  }
+  message VrfExportRule {
+    string gobgp_vrf = 1;              // GoBGP VRF name
+    string linux_vrf = 2;              // Target Linux VRF name
+    int32 linux_table_id = 3;          // Target Linux table ID
+    uint32 metric = 4;
+    bool validate_nexthop = 5;
+    repeated string community_list = 6;
+    repeated string large_community_list = 7;
+  }
+  repeated ExportRule rules = 1;
+  repeated VrfExportRule vrf_rules = 2;
 }
 
 message GetNetlinkImportStatsRequest {}
 
 message GetNetlinkImportStatsResponse {
-	uint64 imported = 1;
-	uint64 withdrawn = 2;
-	uint64 errors = 3;
-	int64 last_import_time = 4; // Unix timestamp
-	int64 last_withdraw_time = 5; // Unix timestamp
-	int64 last_error_time = 6; // Unix timestamp
-	string last_error_msg = 7;
+  uint64 imported = 1;
+  uint64 withdrawn = 2;
+  uint64 errors = 3;
+  int64 last_import_time = 4; // Unix timestamp
+  int64 last_withdraw_time = 5; // Unix timestamp
+  int64 last_error_time = 6; // Unix timestamp
+  string last_error_msg = 7;
 }
 
 

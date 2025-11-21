@@ -1,6 +1,7 @@
 # Netlink Integration
 
 GoBGP can integrate with the Linux kernel's routing table using Netlink. This feature allows GoBGP to:
+
 - **Import routes** from the kernel (e.g., connected routes) into its RIB
 - **Export routes** from its RIB into the Linux kernel routing table
 
@@ -16,7 +17,7 @@ This is useful for scenarios where you want to advertise the host's own network 
 
 ---
 
-# Netlink Import
+## Netlink Import
 
 ## Overview
 
@@ -195,7 +196,7 @@ Import Statistics:
 
 ---
 
-# Netlink Export
+## Netlink Export
 
 ## Overview
 
@@ -641,7 +642,7 @@ A route with community `65000:999` will be exported to **both** table 100 and ta
 
 ---
 
-# CLI Commands
+## CLI Commands
 
 ## Netlink Status
 
@@ -801,7 +802,7 @@ gobgp netlink              # Status overview
 
 ---
 
-# gRPC API
+## gRPC API
 
 ## Import API
 
@@ -925,7 +926,7 @@ rpc FlushNetlinkExport(FlushNetlinkExportRequest) returns (FlushNetlinkExportRes
 
 ---
 
-# Verification
+## Verification
 
 ## Verify Routes in Linux Kernel
 
@@ -979,7 +980,7 @@ watch -n 1 'ip route show proto 186'
 
 ---
 
-# Troubleshooting
+## Troubleshooting
 
 ## Import Issues
 
@@ -1158,7 +1159,7 @@ ip route show proto 186
 
 ---
 
-# Performance Considerations
+## Performance Considerations
 
 ## Scale Limits
 
@@ -1188,7 +1189,7 @@ ip route show proto 186
 
 ---
 
-# Security Considerations
+## Security Considerations
 
 ## Required Capabilities
 
@@ -1216,7 +1217,7 @@ docker run --cap-add NET_ADMIN ...
 
 ---
 
-# Integration Examples
+## Integration Examples
 
 ## Container/Kubernetes Environments
 
@@ -1252,7 +1253,7 @@ Run GoBGP alongside Zebra/FRR:
 
 ---
 
-# FAQ
+## FAQ
 
 **Q: Why are my imported routes not appearing in BGP RIB?**
 A: Check that import is enabled, interfaces exist and are up, and review import statistics for errors.
@@ -1286,7 +1287,7 @@ A: On SIGHUP, GoBGP re-evaluates all routes against new rules. Routes are added/
 
 ---
 
-# Development
+## Development
 
 ## Regenerating Protocol Buffer Files
 

@@ -2053,13 +2053,13 @@ func (s *BgpServer) ListNetlinkExportRules(ctx context.Context, req *api.ListNet
 		}
 
 		apiRule := &api.ListNetlinkExportRulesResponse_ExportRule{
-			Name:                rule.Name,
-			CommunityList:       communityList,
-			LargeCommunityList:  largeCommunityList,
-			Vrf:                 rule.VrfName,
-			TableId:             int32(rule.TableId),
-			Metric:              rule.Metric,
-			ValidateNexthop:     rule.ValidateNexthop,
+			Name:               rule.Name,
+			CommunityList:      communityList,
+			LargeCommunityList: largeCommunityList,
+			Vrf:                rule.VrfName,
+			TableId:            int32(rule.TableId),
+			Metric:             rule.Metric,
+			ValidateNexthop:    rule.ValidateNexthop,
 		}
 		apiRules = append(apiRules, apiRule)
 	}

@@ -62,8 +62,6 @@ Try [a binary release](https://github.com/purelb/gobgp-netlink/releases/latest).
 
 ### Externals
 
-
-
 ## Community, discussion and support
 
 The Purelb team have a slack channel [Kubernetes/PureLB](https://kubernetes.slack.com/archives/C01BCB7U031) where you can post regarding the gobgp-netlink project.

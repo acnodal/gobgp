@@ -23,27 +23,27 @@ import (
 	"sync"
 	"time"
 
+	custom_net "github.com/osrg/gobgp/v4/internal/pkg/netutils"
 	"github.com/osrg/gobgp/v4/internal/pkg/table"
 	"github.com/osrg/gobgp/v4/pkg/config/oc"
 	"github.com/osrg/gobgp/v4/pkg/netlink"
 	"github.com/osrg/gobgp/v4/pkg/packet/bgp"
-	custom_net "github.com/osrg/gobgp/v4/internal/pkg/netutils"
 )
 
 type netlinkImportStats struct {
-	Imported        uint64
-	Withdrawn       uint64
-	Errors          uint64
-	LastImport      time.Time
-	LastWithdraw    time.Time
-	LastError       time.Time
-	LastErrorMsg    string
+	Imported     uint64
+	Withdrawn    uint64
+	Errors       uint64
+	LastImport   time.Time
+	LastWithdraw time.Time
+	LastError    time.Time
+	LastErrorMsg string
 }
 
 type netlinkClient struct {
-	client          *netlink.NetlinkClient
-	server          *BgpServer
-	dead            chan struct{}
+	client *netlink.NetlinkClient
+	server *BgpServer
+	dead   chan struct{}
 	// advertisedPaths tracks paths per VRF (vrf name -> prefix -> path)
 	// empty string key is used for global table
 	advertisedPaths map[string]map[string]*table.Path
