@@ -542,4 +542,4 @@ jobs:
           CGO_ENABLED=0 go build -o gobgpd ./cmd/gobgpd
           CGO_ENABLED=0 go build -o gobgp ./cmd/gobgp
       - name: Run netlink tests
-        run: sudo ./test-netlink.sh
+        run: sudo ./test/scenario_test/netlink_test.sh
