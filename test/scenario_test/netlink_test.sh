@@ -138,31 +138,35 @@ setup_environment() {
     # Load VRF kernel module if not loaded
     modprobe vrf 2>/dev/null || true
 
-    # Create VRF
-    if ! ip link add "$VRF_NAME" type vrf table "$VRF_TABLE" 2>/dev/null; then
-        log_error "Failed to create VRF. VRF support may not be available in the kernel."
-        exit 1
+    # Try to create VRF (optional - tests will skip VRF tests if this fails)
+    VRF_AVAILABLE=false
+    if ip link add "$VRF_NAME" type vrf table "$VRF_TABLE" 2>/dev/null; then
+        ip link set "$VRF_NAME" up
+        VRF_AVAILABLE=true
+        log_info "VRF $VRF_NAME created successfully"
+    else
+        log_info "VRF creation failed - VRF tests will be skipped"
     fi
-    ip link set "$VRF_NAME" up
-    assert_success "VRF $VRF_NAME created"
 
     # Create test interfaces
     ip link add "$IFACE_GLOBAL" type dummy
-    ip link add "$IFACE_VRF" type dummy
-    assert_success "Test interfaces created"
-
-    # Assign VRF interface to VRF
-    ip link set "$IFACE_VRF" master "$VRF_NAME"
     ip link set "$IFACE_GLOBAL" up
-    ip link set "$IFACE_VRF" up
-    assert_success "Interfaces configured"
+    assert_success "Global test interface created"
 
-    # Add IP addresses
+    # Add IP addresses to global interface
     ip addr add 192.168.100.1/24 dev "$IFACE_GLOBAL"
-    ip addr add 192.168.101.1/24 dev "$IFACE_VRF"
     ip addr add fd00:100::1/64 dev "$IFACE_GLOBAL"
-    ip addr add fd00:101::1/64 dev "$IFACE_VRF"
-    assert_success "IP addresses assigned"
+    assert_success "IP addresses assigned to global interface"
+
+    # Create VRF interface only if VRF is available
+    if [ "$VRF_AVAILABLE" = true ]; then
+        ip link add "$IFACE_VRF" type dummy
+        ip link set "$IFACE_VRF" master "$VRF_NAME"
+        ip link set "$IFACE_VRF" up
+        ip addr add 192.168.101.1/24 dev "$IFACE_VRF"
+        ip addr add fd00:101::1/64 dev "$IFACE_VRF"
+        assert_success "VRF interface configured"
+    fi
 
     log_info "Test environment setup complete"
 }
@@ -478,9 +482,21 @@ main() {
 
     # Run tests
     test_import_global
-    test_import_vrf
+
+    if [ "$VRF_AVAILABLE" = true ]; then
+        test_import_vrf
+    else
+        log_info "⏭️  Skipping test_import_vrf (VRF not available)"
+    fi
+
     test_export_global
-    test_export_vrf_onlink
+
+    if [ "$VRF_AVAILABLE" = true ]; then
+        test_export_vrf_onlink
+    else
+        log_info "⏭️  Skipping test_export_vrf_onlink (VRF not available)"
+    fi
+
     test_cli_commands
 
     # Summary
