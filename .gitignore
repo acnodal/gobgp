@@ -5,8 +5,8 @@
 *.pyc
 cmd/gobgp/gobgp
 cmd/gobgpd/gobgpd
-gobgp
-gobgpd
+/gobgp
+/gobgpd
 
 
 # Folders
