@@ -128,8 +128,14 @@ setup_environment() {
     # Ensure test directory exists
     mkdir -p "$TEST_DIR"
 
+    # Load VRF kernel module if not loaded
+    modprobe vrf 2>/dev/null || true
+
     # Create VRF
-    ip link add "$VRF_NAME" type vrf table "$VRF_TABLE" 2>/dev/null || true
+    if ! ip link add "$VRF_NAME" type vrf table "$VRF_TABLE" 2>/dev/null; then
+        log_error "Failed to create VRF. VRF support may not be available in the kernel."
+        exit 1
+    fi
     ip link set "$VRF_NAME" up
     assert_success "VRF $VRF_NAME created"
 
