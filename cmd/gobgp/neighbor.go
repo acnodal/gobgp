@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
@@ -577,7 +578,7 @@ func getPathSymbolString(p *api.Path, idx int, showBest bool) string {
 	return symbols
 }
 
-func getPathAttributeString(nlri bgp.AddrPrefixInterface, attrs []bgp.PathAttributeInterface) string {
+func getPathAttributeString(nlri bgp.NLRI, attrs []bgp.PathAttributeInterface) string {
 	s := make([]string, 0)
 	for _, a := range attrs {
 		switch a.GetType() {
@@ -813,7 +814,10 @@ func showValidationInfo(p *api.Path, shownAs map[uint32]struct{}) error {
 }
 
 func showRibInfo(r, name string) error {
-	def := addr2AddressFamily(net.ParseIP(name))
+	var def *api.Family
+	if addr, err := netip.ParseAddr(name); err == nil {
+		def = addr2AddressFamily(addr)
+	}
 	if r == cmdGlobal || r == cmdVRF {
 		def = ipv4UC
 	}
@@ -878,7 +882,11 @@ func showNeighborRib(r string, name string, args []string) error {
 	validationTarget := ""
 	rd := ""
 
-	def := addr2AddressFamily(net.ParseIP(name))
+	var def *api.Family
+	if addr, err := netip.ParseAddr(name); err == nil {
+		def = addr2AddressFamily(addr)
+	}
+
 	switch r {
 	case cmdGlobal:
 		def = ipv4UC
@@ -1172,9 +1180,6 @@ func showNeighborPolicy(remoteIP, policyType string, indent int) error {
 	default:
 		return fmt.Errorf("invalid policy type: choose from (import|export)")
 	}
-	if remoteIP == "" {
-		remoteIP = globalRIBName
-	}
 	stream, err := client.ListPolicyAssignment(ctx, &api.ListPolicyAssignmentRequest{
 		Name:      remoteIP,
 		Direction: dir,
@@ -1226,10 +1231,6 @@ func extractDefaultAction(args []string) ([]string, api.RouteAction, error) {
 }
 
 func modNeighborPolicy(remoteIP, policyType, cmdType string, args []string) error {
-	if remoteIP == "" {
-		remoteIP = globalRIBName
-	}
-
 	assign := &api.PolicyAssignment{
 		Name: remoteIP,
 	}

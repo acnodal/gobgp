@@ -17,12 +17,12 @@ package server
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 	"sync"
 	"time"
 
 	"github.com/osrg/gobgp/v4/internal/pkg/table"
-	"github.com/osrg/gobgp/v4/pkg/log"
 	"github.com/osrg/gobgp/v4/pkg/packet/bgp"
 
 	go_netlink "github.com/vishvananda/netlink"
@@ -93,7 +93,7 @@ type vrfExportConfig struct {
 type netlinkExportClient struct {
 	client   *go_netlink.Handle
 	server   *BgpServer
-	logger   log.Logger
+	logger   *slog.Logger
 	rules    []*exportRule
 	exported map[string]map[string]*exportedRouteInfo // vrf -> prefix -> info
 	mu       sync.RWMutex
@@ -120,7 +120,7 @@ type netlinkExportClient struct {
 }
 
 // newNetlinkExportClient creates a new netlink export client
-func newNetlinkExportClient(server *BgpServer, logger log.Logger, routeProtocol int, dampeningInterval time.Duration) (*netlinkExportClient, error) {
+func newNetlinkExportClient(server *BgpServer, logger *slog.Logger, routeProtocol int, dampeningInterval time.Duration) (*netlinkExportClient, error) {
 	handle, err := go_netlink.NewHandle()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create netlink handle: %w", err)
@@ -151,10 +151,8 @@ func newNetlinkExportClient(server *BgpServer, logger log.Logger, routeProtocol 
 	// Clean up any stale routes from previous runs
 	if err := client.cleanupStaleRoutes(); err != nil {
 		logger.Warn("Failed to cleanup stale routes at startup",
-			log.Fields{
-				"Topic": "netlink",
-				"Error": err,
-			})
+			slog.String("Topic", "netlink"),
+			slog.Any("Error", err))
 	}
 
 	return client, nil
@@ -163,7 +161,8 @@ func newNetlinkExportClient(server *BgpServer, logger log.Logger, routeProtocol 
 // cleanupStaleRoutes removes any routes with our protocol that were left behind from previous runs
 func (e *netlinkExportClient) cleanupStaleRoutes() error {
 	e.logger.Info("Cleaning up stale netlink routes from previous runs",
-		log.Fields{"Topic": "netlink", "Protocol": e.routeProtocol})
+		slog.String("Topic", "netlink"),
+		slog.Int("Protocol", e.routeProtocol))
 
 	// We need to list routes from all tables (including VRFs)
 	// The netlink library's RouteList(nil, family) only lists from the main table
@@ -185,10 +184,8 @@ func (e *netlinkExportClient) cleanupStaleRoutes() error {
 	}
 
 	e.logger.Debug("Checking tables for stale routes",
-		log.Fields{
-			"Topic":  "netlink",
-			"Tables": tablesToCheck,
-		})
+		slog.String("Topic", "netlink"),
+		slog.Any("Tables", tablesToCheck))
 
 	cleanedCount := 0
 
@@ -209,11 +206,9 @@ func (e *netlinkExportClient) cleanupStaleRoutes() error {
 
 		if err != nil {
 			e.logger.Warn("Failed to list routes from table",
-				log.Fields{
-					"Topic": "netlink",
-					"Table": tableId,
-					"Error": err,
-				})
+				slog.String("Topic", "netlink"),
+				slog.Int("Table", tableId),
+				slog.Any("Error", err))
 			continue
 		}
 
@@ -221,22 +216,18 @@ func (e *netlinkExportClient) cleanupStaleRoutes() error {
 		for _, route := range routes {
 			if route.Protocol == go_netlink.RouteProtocol(e.routeProtocol) {
 				e.logger.Debug("Deleting stale route",
-					log.Fields{
-						"Topic":    "netlink",
-						"Prefix":   route.Dst.String(),
-						"Table":    route.Table,
-						"Protocol": route.Protocol,
-						"Metric":   route.Priority,
-					})
+					slog.String("Topic", "netlink"),
+					slog.String("Prefix", route.Dst.String()),
+					slog.Int("Table", route.Table),
+					slog.Int("Protocol", int(route.Protocol)),
+					slog.Int("Metric", route.Priority))
 
 				if err := e.client.RouteDel(&route); err != nil {
 					e.logger.Warn("Failed to delete stale route",
-						log.Fields{
-							"Topic":  "netlink",
-							"Prefix": route.Dst.String(),
-							"Table":  route.Table,
-							"Error":  err,
-						})
+						slog.String("Topic", "netlink"),
+						slog.String("Prefix", route.Dst.String()),
+						slog.Int("Table", route.Table),
+						slog.Any("Error", err))
 				} else {
 					cleanedCount++
 				}
@@ -246,10 +237,8 @@ func (e *netlinkExportClient) cleanupStaleRoutes() error {
 
 	if cleanedCount > 0 {
 		e.logger.Info("Cleaned up stale routes",
-			log.Fields{
-				"Topic": "netlink",
-				"Count": cleanedCount,
-			})
+			slog.String("Topic", "netlink"),
+			slog.Int("Count", cleanedCount))
 	}
 
 	return nil
@@ -316,12 +305,10 @@ func (e *netlinkExportClient) buildVrfMappings() error {
 			comm, err := table.ParseCommunity(commStr)
 			if err != nil {
 				e.logger.Warn("Failed to parse community in VRF export config",
-					log.Fields{
-						"Topic":     "netlink",
-						"VRF":       vrf.Config.Name,
-						"Community": commStr,
-						"Error":     err,
-					})
+					slog.String("Topic", "netlink"),
+					slog.String("VRF", vrf.Config.Name),
+					slog.String("Community", commStr),
+					slog.Any("Error", err))
 				continue
 			}
 			vrfExport.CommunityList = append(vrfExport.CommunityList, comm)
@@ -333,12 +320,10 @@ func (e *netlinkExportClient) buildVrfMappings() error {
 			lcomm, err := bgp.ParseLargeCommunity(lcommStr)
 			if err != nil {
 				e.logger.Warn("Failed to parse large community in VRF export config",
-					log.Fields{
-						"Topic":          "netlink",
-						"VRF":            vrf.Config.Name,
-						"LargeCommunity": lcommStr,
-						"Error":          err,
-					})
+					slog.String("Topic", "netlink"),
+					slog.String("VRF", vrf.Config.Name),
+					slog.String("LargeCommunity", lcommStr),
+					slog.Any("Error", err))
 				continue
 			}
 			vrfExport.LargeCommunityList = append(vrfExport.LargeCommunityList, lcomm)
@@ -349,12 +334,10 @@ func (e *netlinkExportClient) buildVrfMappings() error {
 			tableId, err := e.lookupLinuxVrfTableId(vrfExport.LinuxVrf)
 			if err != nil {
 				e.logger.Warn("Failed to lookup Linux VRF table ID, will use main table",
-					log.Fields{
-						"Topic":    "netlink",
-						"VRF":      vrf.Config.Name,
-						"LinuxVRF": vrfExport.LinuxVrf,
-						"Error":    err,
-					})
+					slog.String("Topic", "netlink"),
+					slog.String("VRF", vrf.Config.Name),
+					slog.String("LinuxVRF", vrfExport.LinuxVrf),
+					slog.Any("Error", err))
 			} else {
 				vrfExport.LinuxTableId = tableId
 			}
@@ -363,14 +346,12 @@ func (e *netlinkExportClient) buildVrfMappings() error {
 		e.vrfRules[vrf.Config.Name] = vrfExport
 
 		e.logger.Info("Configured VRF export",
-			log.Fields{
-				"Topic":          "netlink",
-				"VRF":            vrf.Config.Name,
-				"LinuxVRF":       vrfExport.LinuxVrf,
-				"LinuxTable":     vrfExport.LinuxTableId,
-				"Metric":         vrfExport.Metric,
-				"ValidateNexthop": vrfExport.ValidateNexthop,
-			})
+			slog.String("Topic", "netlink"),
+			slog.String("VRF", vrf.Config.Name),
+			slog.String("LinuxVRF", vrfExport.LinuxVrf),
+			slog.Int("LinuxTable", vrfExport.LinuxTableId),
+			slog.Any("Metric", vrfExport.Metric),
+			slog.Bool("ValidateNexthop", vrfExport.ValidateNexthop))
 	}
 
 	return nil
@@ -403,10 +384,8 @@ func (e *netlinkExportClient) lookupLinuxVrfTableId(vrfName string) (int, error)
 // are exported/withdrawn according to the new rules
 func (e *netlinkExportClient) reEvaluateAllRoutes(pathList []*table.Path) {
 	e.logger.Info("Re-evaluating all routes with new export rules",
-		log.Fields{
-			"Topic":      "netlink",
-			"PathCount":  len(pathList),
-		})
+		slog.String("Topic", "netlink"),
+		slog.Int("PathCount", len(pathList)))
 
 	// Build a set of prefixes that should be exported based on new rules
 	shouldExport := make(map[string]map[string]bool) // vrf -> prefix -> should export
@@ -463,11 +442,9 @@ func (e *netlinkExportClient) reEvaluateAllRoutes(pathList []*table.Path) {
 	// Withdraw routes outside the lock
 	for _, w := range routesToWithdraw {
 		e.logger.Info("Withdrawing route that no longer matches any rule",
-			log.Fields{
-				"Topic":  "netlink",
-				"Prefix": w.prefix,
-				"VRF":    w.vrf,
-			})
+			slog.String("Topic", "netlink"),
+			slog.String("Prefix", w.prefix),
+			slog.String("VRF", w.vrf))
 
 		// Delete the route directly
 		err := e.client.RouteDel(w.route)
@@ -478,12 +455,10 @@ func (e *netlinkExportClient) reEvaluateAllRoutes(pathList []*table.Path) {
 			e.stats.LastErrorMsg = fmt.Sprintf("RouteDel failed for %s: %v", w.prefix, err)
 			e.statsMu.Unlock()
 			e.logger.Warn("Failed to withdraw route",
-				log.Fields{
-					"Topic":  "netlink",
-					"Prefix": w.prefix,
-					"VRF":    w.vrf,
-					"Error":  err,
-				})
+				slog.String("Topic", "netlink"),
+				slog.String("Prefix", w.prefix),
+				slog.String("VRF", w.vrf),
+				slog.Any("Error", err))
 		} else {
 			// Remove from tracking
 			e.mu.Lock()
@@ -501,9 +476,7 @@ func (e *netlinkExportClient) reEvaluateAllRoutes(pathList []*table.Path) {
 	}
 
 	e.logger.Info("Route re-evaluation complete",
-		log.Fields{
-			"Topic": "netlink",
-		})
+		slog.String("Topic", "netlink"))
 }
 
 // close shuts down the export client
@@ -603,26 +576,14 @@ func (e *netlinkExportClient) exportRoute(path *table.Path, rule *exportRule) er
 
 	if family == bgp.RF_IPv4_VPN || family == bgp.RF_IPv6_VPN {
 		// VPN family - extract plain prefix without RD
-		switch vpnNlri := nlri.(type) {
-		case *bgp.LabeledVPNIPAddrPrefix:
-			prefix = vpnNlri.IPPrefix() // Returns "10.0.0.0/24" without RD
-			e.logger.Debug("Processing IPv4 VPN family path",
-				log.Fields{
-					"Topic":  "netlink",
-					"Prefix": prefix,
-					"RD":     vpnNlri.RD.String(),
-					"Family": family.String(),
-				})
-		case *bgp.LabeledVPNIPv6AddrPrefix:
-			prefix = vpnNlri.IPPrefix() // Returns "fd66:1::/64" without RD
-			e.logger.Debug("Processing IPv6 VPN family path",
-				log.Fields{
-					"Topic":  "netlink",
-					"Prefix": prefix,
-					"RD":     vpnNlri.RD.String(),
-					"Family": family.String(),
-				})
-		default:
+		if vpnNlri, ok := nlri.(*bgp.LabeledVPNIPAddrPrefix); ok {
+			prefix = vpnNlri.IPPrefix()
+			e.logger.Debug("Processing VPN family path",
+				slog.String("Topic", "netlink"),
+				slog.String("Prefix", prefix),
+				slog.String("RD", vpnNlri.RD.String()),
+				slog.String("Family", family.String()))
+		} else {
 			return fmt.Errorf("unexpected VPN NLRI type for family %s", family.String())
 		}
 	} else {
@@ -643,13 +604,11 @@ func (e *netlinkExportClient) exportRoute(path *table.Path, rule *exportRule) er
 	if rule.ValidateNexthop {
 		if !e.isNexthopReachable(nexthopIP, rule.TableId) {
 			e.logger.Debug("Nexthop validation failed",
-				log.Fields{
-					"Topic":    "netlink",
-					"Prefix":   prefix,
-					"Nexthop":  nexthop.String(),
-					"Rule":     rule.Name,
-					"VRF":      rule.VrfName,
-				})
+				slog.String("Topic", "netlink"),
+				slog.String("Prefix", prefix),
+				slog.String("Nexthop", nexthop.String()),
+				slog.String("Rule", rule.Name),
+				slog.String("VRF", rule.VrfName))
 			return fmt.Errorf("nexthop %s not reachable", nexthop.String())
 		}
 	}
@@ -673,24 +632,20 @@ func (e *netlinkExportClient) exportRoute(path *table.Path, rule *exportRule) er
 				// Parameters changed, need to delete old route first
 				e.mu.RUnlock()
 				e.logger.Info("Route parameters changed, deleting old route before re-export",
-					log.Fields{
-						"Topic":       "netlink",
-						"Prefix":      prefix,
-						"Rule":        rule.Name,
-						"OldMetric":   existingRoute.Priority,
-						"NewMetric":   rule.Metric,
-						"OldTable":    existingRoute.Table,
-						"NewTable":    rule.TableId,
-					})
+					slog.String("Topic", "netlink"),
+					slog.String("Prefix", prefix),
+					slog.String("Rule", rule.Name),
+					slog.Int("OldMetric", existingRoute.Priority),
+					slog.Any("NewMetric", rule.Metric),
+					slog.Int("OldTable", existingRoute.Table),
+					slog.Int("NewTable", rule.TableId))
 
 				// Delete the old route
 				if err := e.client.RouteDel(existingRoute); err != nil {
 					e.logger.Warn("Failed to delete old route during parameter change",
-						log.Fields{
-							"Topic":  "netlink",
-							"Prefix": prefix,
-							"Error":  err,
-						})
+						slog.String("Topic", "netlink"),
+						slog.String("Prefix", prefix),
+						slog.Any("Error", err))
 				}
 
 				// Remove from tracking so we can add the new one
@@ -733,28 +688,22 @@ func (e *netlinkExportClient) exportRoute(path *table.Path, rule *exportRule) er
 			vrfLink, err := e.client.LinkByName(rule.VrfName)
 			if err != nil {
 				e.logger.Warn("Failed to lookup VRF link for ONLINK route",
-					log.Fields{
-						"Topic": "netlink",
-						"VRF":   rule.VrfName,
-						"Error": err,
-					})
+					slog.String("Topic", "netlink"),
+					slog.String("VRF", rule.VrfName),
+					slog.Any("Error", err))
 			} else {
 				route.LinkIndex = vrfLink.Attrs().Index
 				e.logger.Debug("Setting VRF device for ONLINK route",
-					log.Fields{
-						"Topic":     "netlink",
-						"VRF":       rule.VrfName,
-						"LinkIndex": route.LinkIndex,
-					})
+					slog.String("Topic", "netlink"),
+					slog.String("VRF", rule.VrfName),
+					slog.Int("LinkIndex", route.LinkIndex))
 			}
 		}
 
 		e.logger.Debug("Setting ONLINK flag for route with unvalidated nexthop",
-			log.Fields{
-				"Topic":   "netlink",
-				"Prefix":  prefix,
-				"Nexthop": nexthop.String(),
-			})
+			slog.String("Topic", "netlink"),
+			slog.String("Prefix", prefix),
+			slog.String("Nexthop", nexthop.String()))
 	}
 
 	// Add the route
@@ -767,14 +716,12 @@ func (e *netlinkExportClient) exportRoute(path *table.Path, rule *exportRule) er
 		e.statsMu.Unlock()
 
 		e.logger.Warn("Failed to export route",
-			log.Fields{
-				"Topic":   "netlink",
-				"Prefix":  prefix,
-				"Nexthop": nexthop.String(),
-				"Rule":    rule.Name,
-				"VRF":     rule.VrfName,
-				"Error":   err,
-			})
+			slog.String("Topic", "netlink"),
+			slog.String("Prefix", prefix),
+			slog.String("Nexthop", nexthop.String()),
+			slog.String("Rule", rule.Name),
+			slog.String("VRF", rule.VrfName),
+			slog.Any("Error", err))
 		return fmt.Errorf("failed to add route %s: %w", prefix, err)
 	}
 
@@ -796,15 +743,13 @@ func (e *netlinkExportClient) exportRoute(path *table.Path, rule *exportRule) er
 	e.statsMu.Unlock()
 
 	e.logger.Info("Exported route to Linux",
-		log.Fields{
-			"Topic":   "netlink",
-			"Prefix":  prefix,
-			"Nexthop": nexthop.String(),
-			"Rule":    rule.Name,
-			"VRF":     rule.VrfName,
-			"Table":   rule.TableId,
-			"Metric":  rule.Metric,
-		})
+		slog.String("Topic", "netlink"),
+		slog.String("Prefix", prefix),
+		slog.String("Nexthop", nexthop.String()),
+		slog.String("Rule", rule.Name),
+		slog.String("VRF", rule.VrfName),
+		slog.Int("Table", rule.TableId),
+		slog.Any("Metric", rule.Metric))
 
 	return nil
 }
@@ -818,12 +763,9 @@ func (e *netlinkExportClient) withdrawRoute(path *table.Path, vrfName string) er
 
 	// For VPN families, extract just the IP prefix without RD
 	if family == bgp.RF_IPv4_VPN || family == bgp.RF_IPv6_VPN {
-		switch vpnNlri := nlri.(type) {
-		case *bgp.LabeledVPNIPAddrPrefix:
+		if vpnNlri, ok := nlri.(*bgp.LabeledVPNIPAddrPrefix); ok {
 			prefix = vpnNlri.IPPrefix()
-		case *bgp.LabeledVPNIPv6AddrPrefix:
-			prefix = vpnNlri.IPPrefix()
-		default:
+		} else {
 			prefix = nlri.String()
 		}
 	} else {
@@ -856,12 +798,10 @@ func (e *netlinkExportClient) withdrawRoute(path *table.Path, vrfName string) er
 		e.statsMu.Unlock()
 
 		e.logger.Warn("Failed to withdraw route",
-			log.Fields{
-				"Topic":  "netlink",
-				"Prefix": prefix,
-				"VRF":    vrfName,
-				"Error":  err,
-			})
+			slog.String("Topic", "netlink"),
+			slog.String("Prefix", prefix),
+			slog.String("VRF", vrfName),
+			slog.Any("Error", err))
 		return fmt.Errorf("failed to delete route %s: %w", prefix, err)
 	}
 
@@ -879,11 +819,9 @@ func (e *netlinkExportClient) withdrawRoute(path *table.Path, vrfName string) er
 	e.statsMu.Unlock()
 
 	e.logger.Info("Withdrew route from Linux",
-		log.Fields{
-			"Topic":  "netlink",
-			"Prefix": prefix,
-			"VRF":    vrfName,
-		})
+		slog.String("Topic", "netlink"),
+		slog.String("Prefix", prefix),
+		slog.String("VRF", vrfName))
 
 	return nil
 }
@@ -946,24 +884,19 @@ func (e *netlinkExportClient) processUpdate(path *table.Path) {
 	nlri := path.GetNlri()
 
 	e.logger.Debug("processUpdate called",
-		log.Fields{
-			"Topic":      "netlink",
-			"Family":     family.String(),
-			"NLRI":       nlri.String(),
-			"IsWithdraw": path.IsWithdraw,
-		})
+		slog.String("Topic", "netlink"),
+		slog.String("Family", family.String()),
+		slog.String("NLRI", nlri.String()),
+		slog.Bool("IsWithdraw", path.IsWithdraw))
 
 	if path.IsWithdraw {
 		// Withdraw from all VRFs where this route was exported
 		// For VPN families, extract just the IP prefix without RD
 		var prefix string
 		if family == bgp.RF_IPv4_VPN || family == bgp.RF_IPv6_VPN {
-			switch vpnNlri := nlri.(type) {
-			case *bgp.LabeledVPNIPAddrPrefix:
+			if vpnNlri, ok := nlri.(*bgp.LabeledVPNIPAddrPrefix); ok {
 				prefix = vpnNlri.IPPrefix()
-			case *bgp.LabeledVPNIPv6AddrPrefix:
-				prefix = vpnNlri.IPPrefix()
-			default:
+			} else {
 				prefix = nlri.String()
 			}
 		} else {
@@ -980,12 +913,10 @@ func (e *netlinkExportClient) processUpdate(path *table.Path) {
 		e.mu.RUnlock()
 
 		e.logger.Debug("Processing withdrawal",
-			log.Fields{
-				"Topic":  "netlink",
-				"Prefix": prefix,
-				"Family": family.String(),
-				"VRFs":   vrfsToWithdraw,
-			})
+			slog.String("Topic", "netlink"),
+			slog.String("Prefix", prefix),
+			slog.String("Family", family.String()),
+			slog.Any("VRFs", vrfsToWithdraw))
 
 		for _, vrfName := range vrfsToWithdraw {
 			e.withdrawRoute(path, vrfName)
@@ -1011,22 +942,18 @@ func (e *netlinkExportClient) processUpdate(path *table.Path) {
 		communities := path.GetCommunities()
 
 		e.logger.Debug("Processing unicast path for export",
-			log.Fields{
-				"Topic":       "netlink",
-				"Prefix":      prefix,
-				"Communities": communities,
-				"RuleCount":   len(rules),
-			})
+			slog.String("Topic", "netlink"),
+			slog.String("Prefix", prefix),
+			slog.Any("Communities", communities),
+			slog.Int("RuleCount", len(rules)))
 
 		for _, rule := range rules {
 			matches := e.matchesRule(path, rule)
 			e.logger.Debug("Checking export rule",
-				log.Fields{
-					"Topic":   "netlink",
-					"Prefix":  prefix,
-					"Rule":    rule.Name,
-					"Matches": matches,
-				})
+				slog.String("Topic", "netlink"),
+				slog.String("Prefix", prefix),
+				slog.String("Rule", rule.Name),
+				slog.Bool("Matches", matches))
 			if matches {
 				e.exportRoute(path, rule)
 			}
@@ -1042,18 +969,14 @@ func (e *netlinkExportClient) processVrfExport(path *table.Path) {
 	var rd string
 	var prefix string
 
-	// Handle both IPv4 and IPv6 VPN NLRI
-	switch vpnNlri := nlri.(type) {
-	case *bgp.LabeledVPNIPAddrPrefix:
-		rd = vpnNlri.RD.String()
-		prefix = vpnNlri.IPPrefix()
-	case *bgp.LabeledVPNIPv6AddrPrefix:
-		rd = vpnNlri.RD.String()
-		prefix = vpnNlri.IPPrefix()
-	default:
+	// Handle VPN NLRI (unified type for IPv4 and IPv6)
+	vpnNlri, ok := nlri.(*bgp.LabeledVPNIPAddrPrefix)
+	if !ok {
 		// Not a VPN NLRI we handle
 		return
 	}
+	rd = vpnNlri.RD.String()
+	prefix = vpnNlri.IPPrefix()
 
 	// Lookup VRF name from RD
 	e.mu.RLock()
@@ -1086,12 +1009,10 @@ func (e *netlinkExportClient) processVrfExport(path *table.Path) {
 	}
 
 	e.logger.Debug("Exporting VPN path with rule",
-		log.Fields{
-			"Topic":           "netlink",
-			"Prefix":          prefix,
-			"VRF":             vrfName,
-			"ValidateNexthop": rule.ValidateNexthop,
-		})
+		slog.String("Topic", "netlink"),
+		slog.String("Prefix", prefix),
+		slog.String("VRF", vrfName),
+		slog.Bool("ValidateNexthop", rule.ValidateNexthop))
 
 	e.exportRoute(path, rule)
 }
@@ -1233,11 +1154,9 @@ func (e *netlinkExportClient) flush() error {
 		err := e.client.RouteDel(route)
 		if err != nil {
 			e.logger.Warn("Failed to delete route during flush",
-				log.Fields{
-					"Topic": "netlink",
-					"Route": route.Dst.String(),
-					"Error": err,
-				})
+				slog.String("Topic", "netlink"),
+				slog.String("Route", route.Dst.String()),
+				slog.Any("Error", err))
 		}
 	}
 
@@ -1247,10 +1166,8 @@ func (e *netlinkExportClient) flush() error {
 	e.mu.Unlock()
 
 	e.logger.Info("Flushed all exported routes",
-		log.Fields{
-			"Topic": "netlink",
-			"Count": len(routesToDelete),
-		})
+		slog.String("Topic", "netlink"),
+		slog.Int("Count", len(routesToDelete)))
 
 	return nil
 }

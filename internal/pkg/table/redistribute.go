@@ -23,19 +23,20 @@ import (
 	"github.com/osrg/gobgp/v4/pkg/packet/bgp"
 )
 
-func NewNlriFromAPI(dst *net.IPNet) (bgp.AddrPrefixInterface, error) {
+func NewNlriFromAPI(dst *net.IPNet) (bgp.PathNLRI, error) {
 	if dst == nil {
-		return nil, fmt.Errorf("nil dst")
+		return bgp.PathNLRI{}, fmt.Errorf("nil dst")
 	}
 	addr, ok := netip.AddrFromSlice(dst.IP)
 	if !ok {
-		return nil, fmt.Errorf("invalid ip address: %s", dst.IP)
+		return bgp.PathNLRI{}, fmt.Errorf("invalid ip address: %s", dst.IP)
 	}
 	ones, _ := dst.Mask.Size()
-	prefix := netip.PrefixFrom(addr, ones)
+	prefix := netip.PrefixFrom(addr.Unmap(), ones)
 
-	if addr.Is4() {
-		return bgp.NewIPAddrPrefix(prefix)
+	nlri, err := bgp.NewIPAddrPrefix(prefix)
+	if err != nil {
+		return bgp.PathNLRI{}, err
 	}
-	return bgp.NewIPv6AddrPrefix(uint8(prefix.Bits()), prefix.Addr().String()), nil
+	return bgp.PathNLRI{NLRI: nlri}, nil
 }

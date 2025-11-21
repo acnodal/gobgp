@@ -18,13 +18,12 @@ package table
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
-	"slices"
 	"time"
 
 	"github.com/dgryski/go-farm"
-	"github.com/osrg/gobgp/v4/pkg/log"
 	"github.com/osrg/gobgp/v4/pkg/packet/bgp"
 )
 
@@ -81,7 +80,8 @@ func ProcessMessage(m *bgp.BGPMessage, peerInfo *PeerInfo, timestamp time.Time, 
 	pathList := make([]*Path, 0, listLen)
 
 	for _, nlri := range update.NLRI {
-		p := NewPath(bgp.RF_IPv4_UC, peerInfo, nlri, treatAsWithdraw, attrs, timestamp, false)
+		p := NewPath(bgp.RF_IPv4_UC, peerInfo, bgp.PathNLRI{NLRI: nlri.NLRI}, treatAsWithdraw, attrs, timestamp, false)
+		p.remoteID = nlri.ID
 		p.SetHash(hash)
 		pathList = append(pathList, p)
 	}
@@ -100,18 +100,20 @@ func ProcessMessage(m *bgp.BGPMessage, peerInfo *PeerInfo, timestamp time.Time, 
 			// of path attrs faster
 			reachAttrs := []bgp.PathAttributeInterface{}
 			if !treatAsWithdraw {
-				nlriAttr, _ := bgp.NewPathAttributeMpReachNLRI(family, []bgp.AddrPrefixInterface{nlri}, nexthop)
+				nlriAttr, _ := bgp.NewPathAttributeMpReachNLRI(family, []bgp.PathNLRI{nlri}, nexthop)
 				reachAttrs = makeAttributeList(attrs, nlriAttr)
 			}
 
-			p := NewPath(family, peerInfo, nlri, treatAsWithdraw, reachAttrs, timestamp, false)
+			p := NewPath(family, peerInfo, bgp.PathNLRI{NLRI: nlri.NLRI}, treatAsWithdraw, reachAttrs, timestamp, false)
+			p.remoteID = nlri.ID
 			p.SetHash(hash)
 			pathList = append(pathList, p)
 		}
 	}
 
 	for _, nlri := range update.WithdrawnRoutes {
-		p := NewPath(bgp.RF_IPv4_UC, peerInfo, nlri, true, []bgp.PathAttributeInterface{}, timestamp, false)
+		p := NewPath(bgp.RF_IPv4_UC, peerInfo, bgp.PathNLRI{NLRI: nlri.NLRI}, true, []bgp.PathAttributeInterface{}, timestamp, false)
+		p.remoteID = nlri.ID
 		pathList = append(pathList, p)
 	}
 
@@ -119,7 +121,8 @@ func ProcessMessage(m *bgp.BGPMessage, peerInfo *PeerInfo, timestamp time.Time, 
 		family := bgp.NewFamily(unreach.AFI, unreach.SAFI)
 
 		for _, nlri := range unreach.Value {
-			p := NewPath(family, peerInfo, nlri, true, []bgp.PathAttributeInterface{}, timestamp, false)
+			p := NewPath(family, peerInfo, bgp.PathNLRI{NLRI: nlri.NLRI}, true, []bgp.PathAttributeInterface{}, timestamp, false)
+			p.remoteID = nlri.ID
 			pathList = append(pathList, p)
 		}
 	}
@@ -141,10 +144,10 @@ type TableManager struct {
 	Tables map[bgp.Family]*Table
 	Vrfs   map[string]*Vrf
 	rfList []bgp.Family
-	logger log.Logger
+	logger *slog.Logger
 }
 
-func NewTableManager(logger log.Logger, rfList []bgp.Family) *TableManager {
+func NewTableManager(logger *slog.Logger, rfList []bgp.Family) *TableManager {
 	t := &TableManager{
 		Tables: make(map[bgp.Family]*Table),
 		Vrfs:   make(map[string]*Vrf),
@@ -170,13 +173,12 @@ func (manager *TableManager) AddVrf(name string, id uint32, rd bgp.RouteDistingu
 		return nil, err
 	}
 	manager.logger.Debug("add vrf",
-		log.Fields{
-			"Topic":    "Vrf",
-			"Key":      name,
-			"Rd":       rd,
-			"ImportRt": rtMap.ToSlice(),
-			"ExportRt": exportRt,
-		})
+		slog.String("Topic", "Vrf"),
+		slog.String("Key", name),
+		slog.String("Rd", rd.String()),
+		slog.Any("ImportRt", rtMap.ToSlice()),
+		slog.Any("ExportRt", exportRt),
+	)
 	manager.Vrfs[name] = &Vrf{
 		Name:     name,
 		Id:       id,
@@ -190,9 +192,9 @@ func (manager *TableManager) AddVrf(name string, id uint32, rd bgp.RouteDistingu
 		nlri := bgp.NewRouteTargetMembershipNLRI(info.AS, target)
 		pattr := make([]bgp.PathAttributeInterface, 0, 2)
 		pattr = append(pattr, bgp.NewPathAttributeOrigin(bgp.BGP_ORIGIN_ATTR_TYPE_IGP))
-		attr, _ := bgp.NewPathAttributeMpReachNLRI(bgp.RF_RTC_UC, []bgp.AddrPrefixInterface{nlri}, nexthop)
+		attr, _ := bgp.NewPathAttributeMpReachNLRI(bgp.RF_RTC_UC, []bgp.PathNLRI{{NLRI: nlri}}, nexthop)
 		pattr = append(pattr, attr)
-		msgs = append(msgs, NewPath(bgp.RF_RTC_UC, info, nlri, false, pattr, time.Now(), false))
+		msgs = append(msgs, NewPath(bgp.RF_RTC_UC, info, bgp.PathNLRI{NLRI: nlri}, false, pattr, time.Now(), false))
 	}
 	return msgs, nil
 }
@@ -207,14 +209,13 @@ func (manager *TableManager) DeleteVrf(name string) ([]*Path, error) {
 		msgs = append(msgs, t.deletePathsByVrf(vrf)...)
 	}
 	manager.logger.Debug("delete vrf",
-		log.Fields{
-			"Topic":     "Vrf",
-			"Key":       vrf.Name,
-			"Rd":        vrf.Rd,
-			"ImportRt":  vrf.ImportRt.ToSlice(),
-			"ExportRt":  vrf.ExportRt,
-			"MplsLabel": vrf.MplsLabel,
-		})
+		slog.String("Topic", "Vrf"),
+		slog.String("Key", vrf.Name),
+		slog.String("Rd", vrf.Rd.String()),
+		slog.Any("ImportRt", vrf.ImportRt.ToSlice()),
+		slog.Any("ExportRt", vrf.ExportRt),
+		slog.Any("MplsLabel", vrf.MplsLabel),
+	)
 	delete(manager.Vrfs, name)
 	rtcTable := manager.Tables[bgp.RF_RTC_UC]
 	msgs = append(msgs, rtcTable.deleteRTCPathsByVrf(vrf, manager.Vrfs)...)
@@ -366,12 +367,12 @@ func (manager *TableManager) GetPathListWithMac(id string, as uint32, rfList []b
 	return paths
 }
 
-func (manager *TableManager) GetPathListWithNexthop(id string, rfList []bgp.Family, nexthop net.IP) []*Path {
+func (manager *TableManager) GetPathListWithNexthop(id string, rfList []bgp.Family, nexthop netip.Addr) []*Path {
 	paths := make([]*Path, 0, manager.getDestinationCount(rfList))
 	for _, rf := range rfList {
 		if t, ok := manager.Tables[rf]; ok {
 			for _, path := range t.GetKnownPathList(id, 0) {
-				if slices.Equal(path.GetNexthop().AsSlice(), nexthop) {
+				if path.GetNexthop() == nexthop {
 					paths = append(paths, path)
 				}
 			}

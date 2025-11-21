@@ -18,7 +18,9 @@ package table
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
+	"net/netip"
 	"reflect"
 	"regexp"
 	"slices"
@@ -30,7 +32,6 @@ import (
 	"github.com/k-sone/critbitgo"
 	"github.com/osrg/gobgp/v4/api"
 	"github.com/osrg/gobgp/v4/pkg/config/oc"
-	"github.com/osrg/gobgp/v4/pkg/log"
 	"github.com/osrg/gobgp/v4/pkg/packet/bgp"
 )
 
@@ -284,12 +285,9 @@ func (p *Prefix) Match(path *Path) bool {
 	var pAddr net.IP
 	var pMasklen uint8
 	switch rf {
-	case bgp.RF_IPv4_UC:
+	case bgp.RF_IPv4_UC, bgp.RF_IPv6_UC:
 		pAddr = net.IP(path.GetNlri().(*bgp.IPAddrPrefix).Prefix.Addr().AsSlice())
 		pMasklen = uint8(path.GetNlri().(*bgp.IPAddrPrefix).Prefix.Bits())
-	case bgp.RF_IPv6_UC:
-		pAddr = net.IP(path.GetNlri().(*bgp.IPv6AddrPrefix).Prefix.Addr().AsSlice())
-		pMasklen = uint8(path.GetNlri().(*bgp.IPv6AddrPrefix).Prefix.Bits())
 	default:
 		return false
 	}
@@ -328,13 +326,13 @@ func (p *Prefix) PrefixString() string {
 var _regexpPrefixRange = regexp.MustCompile(`(\d+)\.\.(\d+)`)
 
 func NewPrefix(c oc.Prefix) (*Prefix, error) {
-	_, prefix, err := net.ParseCIDR(c.IpPrefix)
+	_, prefix, err := net.ParseCIDR(c.IpPrefix.String())
 	if err != nil {
 		return nil, err
 	}
 
 	rf := bgp.RF_IPv4_UC
-	if strings.Contains(c.IpPrefix, ":") {
+	if strings.Contains(c.IpPrefix.String(), ":") {
 		rf = bgp.RF_IPv6_UC
 	}
 	p := &Prefix{
@@ -463,7 +461,7 @@ func (s *PrefixSet) ToConfig() *oc.PrefixSet {
 	s.tree.Walk(nil, func(_ *net.IPNet, v any) bool {
 		ps := v.([]*Prefix)
 		for _, p := range ps {
-			list = append(list, oc.Prefix{IpPrefix: p.PrefixString(), MasklengthRange: fmt.Sprintf("%d..%d", p.MasklengthRangeMin, p.MasklengthRangeMax)})
+			list = append(list, oc.Prefix{IpPrefix: netip.MustParsePrefix(p.PrefixString()), MasklengthRange: fmt.Sprintf("%d..%d", p.MasklengthRangeMin, p.MasklengthRangeMax)})
 		}
 		return true
 	})
@@ -2858,7 +2856,7 @@ func (s *Statement) Evaluate(p *Path, options *PolicyOptions) bool {
 	return true
 }
 
-func (s *Statement) Apply(logger log.Logger, path *Path, options *PolicyOptions) (RouteType, *Path) {
+func (s *Statement) Apply(logger *slog.Logger, path *Path, options *PolicyOptions) (RouteType, *Path) {
 	result := s.Evaluate(path, options)
 	if result {
 		if len(s.ModActions) != 0 {
@@ -2869,10 +2867,8 @@ func (s *Statement) Apply(logger log.Logger, path *Path, options *PolicyOptions)
 				path, err = action.Apply(path, options)
 				if err != nil {
 					logger.Warn("action failed",
-						log.Fields{
-							"Topic": "policy",
-							"Error": err,
-						})
+						slog.String("Topic", "policy"),
+						slog.String("Error", err.Error()))
 				}
 			}
 		}
@@ -2913,7 +2909,12 @@ func (s *Statement) ToConfig() *oc.Statement {
 				case *LargeCommunityCondition:
 					cond.BgpConditions.MatchLargeCommunitySet = oc.MatchLargeCommunitySet{LargeCommunitySet: v.set.Name(), MatchSetOptions: oc.IntToMatchSetOptionsTypeMap[int(v.option)]}
 				case *NextHopCondition:
-					cond.BgpConditions.NextHopInList = v.set.List()
+					l := make([]netip.Addr, 0, len(v.set.List()))
+					for _, n := range v.set.List() {
+						ip := netip.MustParseAddr(n)
+						l = append(l, ip)
+					}
+					cond.BgpConditions.NextHopInList = l
 				case *RpkiValidationCondition:
 					cond.BgpConditions.RpkiValidationResult = v.result
 				case *RouteTypeCondition:
@@ -3137,7 +3138,11 @@ func NewStatement(c oc.Statement) (*Statement, error) {
 			return NewLargeCommunityCondition(c.Conditions.BgpConditions.MatchLargeCommunitySet)
 		},
 		func() (Condition, error) {
-			return NewNextHopCondition(c.Conditions.BgpConditions.NextHopInList)
+			l := make([]string, 0, len(c.Conditions.BgpConditions.NextHopInList))
+			for _, n := range c.Conditions.BgpConditions.NextHopInList {
+				l = append(l, n.String())
+			}
+			return NewNextHopCondition(l)
 		},
 		func() (Condition, error) {
 			return NewAfiSafiInCondition(c.Conditions.BgpConditions.AfiSafiInList)
@@ -3215,7 +3220,7 @@ type Policy struct {
 // Compare path with a policy's condition in stored order in the policy.
 // If a condition match, then this function stops evaluation and
 // subsequent conditions are skipped.
-func (p *Policy) Apply(logger log.Logger, path *Path, options *PolicyOptions) (RouteType, *Path) {
+func (p *Policy) Apply(logger *slog.Logger, path *Path, options *PolicyOptions) (RouteType, *Path) {
 	for _, stmt := range p.Statements {
 		var result RouteType
 		result, path = stmt.Apply(logger, path, options)
@@ -3334,7 +3339,7 @@ type RoutingPolicy struct {
 	statementMap  map[string]*Statement
 	assignmentMap map[string]*Assignment
 	mu            sync.RWMutex
-	logger        log.Logger
+	logger        *slog.Logger
 }
 
 func (r *RoutingPolicy) ApplyPolicy(id string, dir PolicyDirection, before *Path, options *PolicyOptions) *Path {
@@ -3784,7 +3789,7 @@ func (r *RoutingPolicy) AddStatement(st *Statement) (err error) {
 
 	for _, c := range st.Conditions {
 		if err = r.validateCondition(c); err != nil {
-			return
+			return err
 		}
 	}
 	m := r.statementMap
@@ -3851,7 +3856,7 @@ func (r *RoutingPolicy) AddPolicy(x *Policy, refer bool) (err error) {
 	for _, st := range x.Statements {
 		for _, c := range st.Conditions {
 			if err = r.validateCondition(c); err != nil {
-				return
+				return err
 			}
 		}
 	}
@@ -3866,7 +3871,7 @@ func (r *RoutingPolicy) AddPolicy(x *Policy, refer bool) (err error) {
 		for _, st := range x.Statements {
 			if _, ok := sMap[st.Name]; ok {
 				err = fmt.Errorf("statement %s already defined", st.Name)
-				return
+				return err
 			}
 			sMap[st.Name] = st
 		}
@@ -3890,7 +3895,7 @@ func (r *RoutingPolicy) DeletePolicy(x *Policy, all, preserve bool, activeId []s
 	y, ok := pMap[name]
 	if !ok {
 		err = fmt.Errorf("not found policy: %s", name)
-		return
+		return err
 	}
 	inUse := func(ids []string) bool {
 		for _, id := range ids {
@@ -3908,13 +3913,11 @@ func (r *RoutingPolicy) DeletePolicy(x *Policy, all, preserve bool, activeId []s
 	if all {
 		if inUse(activeId) {
 			err = fmt.Errorf("can't delete. policy %s is in use", name)
-			return
+			return err
 		}
 		r.logger.Debug("delete policy",
-			log.Fields{
-				"Topic": "Policy",
-				"Key":   name,
-			})
+			slog.String("Topic", "Policy"),
+			slog.String("Key", name))
 		delete(pMap, name)
 	} else {
 		err = y.Remove(x)
@@ -3923,10 +3926,8 @@ func (r *RoutingPolicy) DeletePolicy(x *Policy, all, preserve bool, activeId []s
 		for _, st := range y.Statements {
 			if !r.statementInUse(st) {
 				r.logger.Debug("delete unused statement",
-					log.Fields{
-						"Topic": "Policy",
-						"Key":   st.Name,
-					})
+					slog.String("Topic", "Policy"),
+					slog.String("Key", st.Name))
 				delete(sMap, st.Name)
 			}
 		}
@@ -3954,11 +3955,11 @@ func (r *RoutingPolicy) AddPolicyAssignment(id string, dir PolicyDirection, poli
 		p, ok := r.policyMap[x.Name]
 		if !ok {
 			err = fmt.Errorf("not found policy %s", x.Name)
-			return
+			return err
 		}
 		if seen[x.Name] {
 			err = fmt.Errorf("duplicated policy %s", x.Name)
-			return
+			return err
 		}
 		seen[x.Name] = true
 		ps = append(ps, p)
@@ -3972,7 +3973,7 @@ func (r *RoutingPolicy) AddPolicyAssignment(id string, dir PolicyDirection, poli
 		for _, x := range ps {
 			if seen[x.Name] {
 				err = fmt.Errorf("duplicated policy %s", x.Name)
-				return
+				return err
 			}
 			seen[x.Name] = true
 		}
@@ -3994,11 +3995,11 @@ func (r *RoutingPolicy) DeletePolicyAssignment(id string, dir PolicyDirection, p
 		p, ok := r.policyMap[x.Name]
 		if !ok {
 			err = fmt.Errorf("not found policy %s", x.Name)
-			return
+			return err
 		}
 		if seen[x.Name] {
 			err = fmt.Errorf("duplicated policy %s", x.Name)
-			return
+			return err
 		}
 		seen[x.Name] = true
 		ps = append(ps, p)
@@ -4042,11 +4043,11 @@ func (r *RoutingPolicy) SetPolicyAssignment(id string, dir PolicyDirection, poli
 		p, ok := r.policyMap[x.Name]
 		if !ok {
 			err = fmt.Errorf("not found policy %s", x.Name)
-			return
+			return err
 		}
 		if seen[x.Name] {
 			err = fmt.Errorf("duplicated policy %s", x.Name)
-			return
+			return err
 		}
 		seen[x.Name] = true
 		ps = append(ps, p)
@@ -4065,10 +4066,8 @@ func (r *RoutingPolicy) Initialize() error {
 
 	if err := r.reload(oc.RoutingPolicy{}); err != nil {
 		r.logger.Error("failed to create routing policy",
-			log.Fields{
-				"Topic": "Policy",
-				"Error": err,
-			})
+			slog.String("Topic", "Policy"),
+			slog.String("Error", err.Error()))
 		return err
 	}
 	return nil
@@ -4079,11 +4078,9 @@ func (r *RoutingPolicy) setPeerPolicy(id string, c oc.ApplyPolicy) {
 		ps, def, err := r.getAssignmentFromConfig(dir, c)
 		if err != nil {
 			r.logger.Error("failed to get policy info",
-				log.Fields{
-					"Topic": "Policy",
-					"Dir":   dir,
-					"Error": err,
-				})
+				slog.String("Topic", "Policy"),
+				slog.String("Dir", dir.String()),
+				slog.String("Error", err.Error()))
 			continue
 		}
 		r.setDefaultPolicy(id, dir, def)
@@ -4108,13 +4105,9 @@ func (r *RoutingPolicy) Reset(rp *oc.RoutingPolicy, ap map[string]oc.ApplyPolicy
 	defer r.mu.Unlock()
 
 	if err := r.reload(*rp); err != nil {
-		r.logger.Fatal("failed to create routing policy",
-			log.Fields{
-				log.FieldFacility: log.FacilityConfig,
-
-				"Topic": "Policy",
-				"Error": err,
-			})
+		r.logger.Error("failed to create routing policy",
+			slog.String("Topic", "Policy"),
+			slog.String("Error", err.Error()))
 		return err
 	}
 
@@ -4124,7 +4117,7 @@ func (r *RoutingPolicy) Reset(rp *oc.RoutingPolicy, ap map[string]oc.ApplyPolicy
 	return nil
 }
 
-func NewRoutingPolicy(logger log.Logger) *RoutingPolicy {
+func NewRoutingPolicy(logger *slog.Logger) *RoutingPolicy {
 	return &RoutingPolicy{
 		definedSetMap: make(map[DefinedType]map[string]DefinedSet),
 		policyMap:     make(map[string]*Policy),
@@ -4259,7 +4252,11 @@ func toStatementApi(s *oc.Statement) *api.Statement {
 		cs.RouteType = api.Conditions_RouteType(s.Conditions.BgpConditions.RouteType.ToInt())
 	}
 	if len(s.Conditions.BgpConditions.NextHopInList) > 0 {
-		cs.NextHopInList = s.Conditions.BgpConditions.NextHopInList
+		l := make([]string, 0, len(s.Conditions.BgpConditions.NextHopInList))
+		for _, n := range s.Conditions.BgpConditions.NextHopInList {
+			l = append(l, n.String())
+		}
+		cs.NextHopInList = l
 	}
 	if s.Conditions.BgpConditions.AfiSafiInList != nil {
 		afiSafiIn := make([]*api.Family, 0)

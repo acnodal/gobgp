@@ -17,9 +17,8 @@ package netutils
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
-
-	"github.com/osrg/gobgp/v4/pkg/log"
 )
 
 type ConnectedRoute struct {
@@ -29,7 +28,7 @@ type ConnectedRoute struct {
 
 // GetGlobalUnicastRoutes returns a list of global unicast IP addresses
 // for a given network interface.
-func GetGlobalUnicastRoutes(interfaceName string, logger log.Logger) ([]*ConnectedRoute, error) {
+func GetGlobalUnicastRoutes(interfaceName string, logger *slog.Logger) ([]*ConnectedRoute, error) {
 	iface, err := net.InterfaceByName(interfaceName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find interface %s: %w", interfaceName, err)
@@ -53,13 +52,11 @@ func GetGlobalUnicastRoutes(interfaceName string, logger log.Logger) ([]*Connect
 			}
 
 			logger.Debug("Found address on interface",
-				log.Fields{
-					"Topic":     "net",
-					"Address":   ipnet.String(),
-					"Network":   network.String(),
-					"Interface": interfaceName,
-					"IsGlobal":  isGlobal,
-				})
+				slog.String("Topic", "net"),
+				slog.String("Address", ipnet.String()),
+				slog.String("Network", network.String()),
+				slog.String("Interface", interfaceName),
+				slog.Bool("IsGlobal", isGlobal))
 
 			if isGlobal {
 				routes = append(routes, &ConnectedRoute{
@@ -76,11 +73,9 @@ func GetGlobalUnicastRoutes(interfaceName string, logger log.Logger) ([]*Connect
 	}
 
 	logger.Debug("Returning routes from interface",
-		log.Fields{
-			"Topic":     "net",
-			"Routes":    routeStrings,
-			"Interface": interfaceName,
-		})
+		slog.String("Topic", "net"),
+		slog.Any("Routes", routeStrings),
+		slog.String("Interface", interfaceName))
 	return routes, nil
 }
 
@@ -111,7 +106,7 @@ func GetLinkLocalIPv6Address(interfaceName string) (net.IP, error) {
 
 // GetIPv4Nexthop returns the IPv4 address for a given network interface.
 // This function looks for a global unicast IPv4 address on the interface.
-func GetIPv4Nexthop(interfaceName string, logger log.Logger) (net.IP, error) {
+func GetIPv4Nexthop(interfaceName string, logger *slog.Logger) (net.IP, error) {
 	iface, err := net.InterfaceByName(interfaceName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find interface %s: %w", interfaceName, err)
@@ -130,11 +125,9 @@ func GetIPv4Nexthop(interfaceName string, logger log.Logger) (net.IP, error) {
 				isGlobal := !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsMulticast() && !ip.IsUnspecified()
 				if isGlobal {
 					logger.Debug("Found IPv4 nexthop on interface",
-						log.Fields{
-							"Topic":     "net",
-							"Interface": interfaceName,
-							"Address":   ip.String(),
-						})
+						slog.String("Topic", "net"),
+						slog.String("Interface", interfaceName),
+						slog.String("Address", ip.String()))
 					return ip, nil
 				}
 			}
@@ -174,7 +167,7 @@ type IPv6Nexthops struct {
 	LinkLocal net.IP
 }
 
-func GetIPv6Nexthops(interfaceName string, logger log.Logger) (*IPv6Nexthops, error) {
+func GetIPv6Nexthops(interfaceName string, logger *slog.Logger) (*IPv6Nexthops, error) {
 	iface, err := net.InterfaceByName(interfaceName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find interface %s: %w", interfaceName, err)
@@ -204,12 +197,10 @@ func GetIPv6Nexthops(interfaceName string, logger log.Logger) (*IPv6Nexthops, er
 	}
 
 	logger.Debug("Found IPv6 nexthops on interface",
-		log.Fields{
-			"Topic":     "net",
-			"Interface": interfaceName,
-			"Global":    nexthops.Global,
-			"LinkLocal": nexthops.LinkLocal,
-		})
+		slog.String("Topic", "net"),
+		slog.String("Interface", interfaceName),
+		slog.Any("Global", nexthops.Global),
+		slog.Any("LinkLocal", nexthops.LinkLocal))
 
 	return nexthops, nil
 }

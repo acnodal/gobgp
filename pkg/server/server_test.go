@@ -18,6 +18,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
 	"runtime"
@@ -36,11 +37,10 @@ import (
 	"github.com/osrg/gobgp/v4/internal/pkg/table"
 	"github.com/osrg/gobgp/v4/pkg/apiutil"
 	"github.com/osrg/gobgp/v4/pkg/config/oc"
-	"github.com/osrg/gobgp/v4/pkg/log"
 	"github.com/osrg/gobgp/v4/pkg/packet/bgp"
 )
 
-var logger = log.NewDefaultLogger()
+var logger = slog.Default()
 
 func TestStop(t *testing.T) {
 	assert := assert.New(t)
@@ -58,7 +58,9 @@ func TestStop(t *testing.T) {
 	assert.NoError(err)
 
 	s = NewBgpServer()
-	s.logger.SetLevel(log.DebugLevel)
+	err = s.SetLogLevel(context.Background(), &api.SetLogLevelRequest{Level: api.SetLogLevelRequest_LEVEL_DEBUG})
+	assert.NoError(err)
+
 	go s.Serve()
 	err = s.StartBgp(context.Background(), &api.StartBgpRequest{
 		Global: &api.Global{
@@ -521,7 +523,7 @@ func TestListPathEnableFiltered(test *testing.T) {
 			Family:    bgpFamily, Name: "127.0.0.1",
 			// TODO(wenovus): This is confusing and we may want to change this.
 			EnableFiltered: true,
-		}, func(prefix bgp.AddrPrefixInterface, paths []*apiutil.Path) {
+		}, func(prefix bgp.NLRI, paths []*apiutil.Path) {
 			count++
 			for _, path := range paths {
 				comms := getCommunities(path)
@@ -543,7 +545,7 @@ func TestListPathEnableFiltered(test *testing.T) {
 			Family:    bgpFamily, Name: "127.0.0.1",
 			// TODO(wenovus): This is confusing and we may want to change this.
 			EnableFiltered: false,
-		}, func(prefix bgp.AddrPrefixInterface, paths []*apiutil.Path) {
+		}, func(prefix bgp.NLRI, paths []*apiutil.Path) {
 			count++
 			for _, path := range paths {
 				if path.Filtered {
@@ -568,7 +570,7 @@ func TestListPathEnableFiltered(test *testing.T) {
 			Family:         bgpFamily,
 			Name:           "127.0.0.1",
 			EnableFiltered: false,
-		}, func(prefix bgp.AddrPrefixInterface, paths []*apiutil.Path) {
+		}, func(prefix bgp.NLRI, paths []*apiutil.Path) {
 			count++
 			for _, path := range paths {
 				comms := getCommunities(path)
@@ -590,7 +592,7 @@ func TestListPathEnableFiltered(test *testing.T) {
 			Family:         bgpFamily,
 			Name:           "127.0.0.1",
 			EnableFiltered: true,
-		}, func(prefix bgp.AddrPrefixInterface, paths []*apiutil.Path) {
+		}, func(prefix bgp.NLRI, paths []*apiutil.Path) {
 			count++
 			for _, path := range paths {
 				if path.Filtered {
@@ -609,14 +611,14 @@ func TestListPathEnableFiltered(test *testing.T) {
 
 	// Check that 10.1.0.0/24 is filtered at the import side.
 	count := 0
-	err = server1.ListPath(apiutil.ListPathRequest{TableType: api.TableType_TABLE_TYPE_GLOBAL, Family: bgpFamily}, func(prefix bgp.AddrPrefixInterface, paths []*apiutil.Path) {
+	err = server1.ListPath(apiutil.ListPathRequest{TableType: api.TableType_TABLE_TYPE_GLOBAL, Family: bgpFamily}, func(prefix bgp.NLRI, paths []*apiutil.Path) {
 		count++
 	})
 	assert.NoError(err)
 	assert.Equal(1, count)
 
 	filtered := 0
-	err = server1.ListPath(apiutil.ListPathRequest{TableType: api.TableType_TABLE_TYPE_ADJ_IN, Family: bgpFamily, Name: "127.0.0.1", EnableFiltered: true}, func(prefix bgp.AddrPrefixInterface, paths []*apiutil.Path) {
+	err = server1.ListPath(apiutil.ListPathRequest{TableType: api.TableType_TABLE_TYPE_ADJ_IN, Family: bgpFamily, Name: "127.0.0.1", EnableFiltered: true}, func(prefix bgp.NLRI, paths []*apiutil.Path) {
 		if paths[0].Filtered {
 			filtered++
 		}
@@ -695,7 +697,7 @@ func TestListPathEnableFiltered(test *testing.T) {
 	assert.NoError(err)
 
 	count = 0
-	err = server1.ListPath(apiutil.ListPathRequest{TableType: api.TableType_TABLE_TYPE_GLOBAL, Family: bgpFamily}, func(prefix bgp.AddrPrefixInterface, paths []*apiutil.Path) {
+	err = server1.ListPath(apiutil.ListPathRequest{TableType: api.TableType_TABLE_TYPE_GLOBAL, Family: bgpFamily}, func(prefix bgp.NLRI, paths []*apiutil.Path) {
 		count++
 	})
 	assert.NoError(err)
@@ -703,7 +705,7 @@ func TestListPathEnableFiltered(test *testing.T) {
 
 	count = 0
 	filtered = 0
-	err = server1.ListPath(apiutil.ListPathRequest{TableType: api.TableType_TABLE_TYPE_ADJ_OUT, Family: bgpFamily, Name: "127.0.0.1", EnableFiltered: true}, func(prefix bgp.AddrPrefixInterface, paths []*apiutil.Path) {
+	err = server1.ListPath(apiutil.ListPathRequest{TableType: api.TableType_TABLE_TYPE_ADJ_OUT, Family: bgpFamily, Name: "127.0.0.1", EnableFiltered: true}, func(prefix bgp.NLRI, paths []*apiutil.Path) {
 		count++
 		if paths[0].Filtered {
 			filtered++
@@ -712,6 +714,110 @@ func TestListPathEnableFiltered(test *testing.T) {
 	assert.NoError(err)
 	assert.Equal(2, count)
 	assert.Equal(1, filtered)
+}
+
+func TestListPathEnableMultipath(t *testing.T) {
+	nlri, err := bgp.NewIPAddrPrefix(netip.MustParsePrefix("10.0.0.0/24"))
+	require.NoError(t, err)
+
+	nh0, err := bgp.NewPathAttributeNextHop(netip.MustParseAddr("192.168.0.1"))
+	require.NoError(t, err)
+
+	nh1, err := bgp.NewPathAttributeNextHop(netip.MustParseAddr("192.168.0.2"))
+	require.NoError(t, err)
+
+	path0 := &apiutil.Path{
+		Family:  bgp.RF_IPv4_UC,
+		Nlri:    nlri,
+		PeerASN: 65001,
+		Attrs: []bgp.PathAttributeInterface{
+			bgp.NewPathAttributeOrigin(0),
+			bgp.NewPathAttributeAsPath([]bgp.AsPathParamInterface{
+				bgp.NewAsPathParam(2, []uint16{65001}),
+			}),
+			nh0,
+		},
+	}
+	require.NoError(t, err)
+
+	path1 := &apiutil.Path{
+		Family:  bgp.RF_IPv4_UC,
+		Nlri:    nlri,
+		PeerASN: 65002,
+		Attrs: []bgp.PathAttributeInterface{
+			bgp.NewPathAttributeOrigin(0),
+			bgp.NewPathAttributeAsPath([]bgp.AsPathParamInterface{
+				bgp.NewAsPathParam(2, []uint16{65002}),
+			}),
+			nh1,
+		},
+	}
+	require.NoError(t, err)
+
+	tests := []struct {
+		name         string
+		useMultiPath bool
+		expectedBest int
+	}{
+		{
+			name:         "without multipath",
+			useMultiPath: false,
+			expectedBest: 1,
+		},
+		{
+			name:         "with multipath",
+			useMultiPath: true,
+			expectedBest: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := NewBgpServer()
+			go server.Serve()
+			err = server.StartBgp(context.Background(), &api.StartBgpRequest{
+				Global: &api.Global{
+					Asn:              1,
+					RouterId:         "1.1.1.1",
+					UseMultiplePaths: tt.useMultiPath,
+					ListenPort:       -1,
+				},
+			})
+			require.NoError(t, err)
+			defer server.StopBgp(context.Background(), &api.StopBgpRequest{})
+
+			_, err = server.AddPath(apiutil.AddPathRequest{
+				Paths: []*apiutil.Path{path0, path1},
+			})
+			require.NoError(t, err)
+
+			err = server.ListPath(
+				apiutil.ListPathRequest{
+					TableType: api.TableType_TABLE_TYPE_LOCAL,
+					Family:    bgp.RF_IPv4_UC,
+				},
+				func(prefix bgp.NLRI, paths []*apiutil.Path) {
+					// We should only see 10.0.0.0/24
+					p, ok := prefix.(*bgp.IPAddrPrefix)
+					require.True(t, ok)
+					require.Equal(t, netip.MustParsePrefix("10.0.0.0/24"), p.Prefix)
+
+					// We should have two paths
+					require.Len(t, paths, 2)
+
+					// Only one path should be marked as best
+					bestCount := 0
+					for _, path := range paths {
+						if path.Best {
+							bestCount++
+						}
+					}
+					require.Equal(t, tt.expectedBest, bestCount, "%d best path(s) expected", tt.expectedBest)
+				},
+			)
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestMonitor(test *testing.T) {
@@ -787,10 +893,11 @@ func TestMonitor(test *testing.T) {
 	// Test WatchBestPath.
 	w := s.watch(WatchBestPath(false))
 
+	panh, _ := bgp.NewPathAttributeNextHop(netip.MustParseAddr("10.0.0.1"))
 	// Advertises a route.
 	attrs := []bgp.PathAttributeInterface{
 		bgp.NewPathAttributeOrigin(0),
-		bgp.NewPathAttributeNextHop("10.0.0.1"),
+		panh,
 	}
 	prefix, _ := bgp.NewIPAddrPrefix(netip.MustParsePrefix("10.0.0.0/24"))
 	path, _ := apiutil.NewPath(bgp.RF_IPv4_UC, prefix, false, attrs, time.Now())
@@ -812,7 +919,7 @@ func TestMonitor(test *testing.T) {
 	// Withdraws the previous route.
 	// NOTE: Withdraw should not require any path attribute.
 	nlri, _ := bgp.NewIPAddrPrefix(netip.MustParsePrefix("10.0.0.0/24"))
-	if err := t.addPathList("", []*table.Path{table.NewPath(bgp.RF_IPv4_UC, nil, nlri, true, nil, time.Now(), false)}); err != nil {
+	if err := t.addPathList("", []*table.Path{table.NewPath(bgp.RF_IPv4_UC, nil, bgp.PathNLRI{NLRI: nlri}, true, nil, time.Now(), false)}); err != nil {
 		test.Error(err)
 	}
 	ev = <-w.Event()
@@ -828,7 +935,7 @@ func TestMonitor(test *testing.T) {
 
 	nlri, _ = bgp.NewIPAddrPrefix(netip.MustParsePrefix("10.1.0.0/24"))
 	// Prepares an initial route to test WatchUpdate with "current" flag.
-	if err := t.addPathList("", []*table.Path{table.NewPath(bgp.RF_IPv4_UC, nil, nlri, false, attrs, time.Now(), false)}); err != nil {
+	if err := t.addPathList("", []*table.Path{table.NewPath(bgp.RF_IPv4_UC, nil, bgp.PathNLRI{NLRI: nlri}, false, attrs, time.Now(), false)}); err != nil {
 		test.Error(err)
 	}
 	for {
@@ -858,7 +965,7 @@ func TestMonitor(test *testing.T) {
 
 	nlri, _ = bgp.NewIPAddrPrefix(netip.MustParsePrefix("10.2.0.0/24"))
 	// Advertises an additional route.
-	if err := t.addPathList("", []*table.Path{table.NewPath(bgp.RF_IPv4_UC, nil, nlri, false, attrs, time.Now(), false)}); err != nil {
+	if err := t.addPathList("", []*table.Path{table.NewPath(bgp.RF_IPv4_UC, nil, bgp.PathNLRI{NLRI: nlri}, false, attrs, time.Now(), false)}); err != nil {
 		test.Error(err)
 	}
 	ev = <-w.Event()
@@ -870,7 +977,7 @@ func TestMonitor(test *testing.T) {
 	nlri, _ = bgp.NewIPAddrPrefix(netip.MustParsePrefix("10.2.0.0/24"))
 	// Withdraws the previous route.
 	// NOTE: Withdraw should not require any path attribute.
-	if err := t.addPathList("", []*table.Path{table.NewPath(bgp.RF_IPv4_UC, nil, nlri, true, nil, time.Now(), false)}); err != nil {
+	if err := t.addPathList("", []*table.Path{table.NewPath(bgp.RF_IPv4_UC, nil, bgp.PathNLRI{NLRI: nlri}, true, nil, time.Now(), false)}); err != nil {
 		test.Error(err)
 	}
 	ev = <-w.Event()
@@ -882,13 +989,14 @@ func TestMonitor(test *testing.T) {
 	// Test bestpath events with vrf and rt import
 	w.Stop()
 	w = s.watch(WatchBestPath(false))
+	panh, _ = bgp.NewPathAttributeNextHop(netip.MustParseAddr("10.0.0.1"))
 	attrs = []bgp.PathAttributeInterface{
 		bgp.NewPathAttributeOrigin(0),
-		bgp.NewPathAttributeNextHop("10.0.0.1"),
+		panh,
 	}
 
 	nlri, _ = bgp.NewIPAddrPrefix(netip.MustParsePrefix("10.0.0.0/24"))
-	if err := s.addPathList("vrf1", []*table.Path{table.NewPath(bgp.RF_IPv4_UC, nil, nlri, false, attrs, time.Now(), false)}); err != nil {
+	if err := s.addPathList("vrf1", []*table.Path{table.NewPath(bgp.RF_IPv4_UC, nil, bgp.PathNLRI{NLRI: nlri}, false, attrs, time.Now(), false)}); err != nil {
 		test.Error(err)
 	}
 	ev = <-w.Event()
@@ -902,7 +1010,7 @@ func TestMonitor(test *testing.T) {
 
 	nlri, _ = bgp.NewIPAddrPrefix(netip.MustParsePrefix("10.0.0.0/24"))
 	// Withdraw the route
-	if err := s.addPathList("vrf1", []*table.Path{table.NewPath(bgp.RF_IPv4_UC, nil, nlri, true, attrs, time.Now(), false)}); err != nil {
+	if err := s.addPathList("vrf1", []*table.Path{table.NewPath(bgp.RF_IPv4_UC, nil, bgp.PathNLRI{NLRI: nlri}, true, attrs, time.Now(), false)}); err != nil {
 		test.Error(err)
 	}
 	ev = <-w.Event()
@@ -963,7 +1071,8 @@ func TestNumGoroutineWithAddDeleteNeighbor(t *testing.T) {
 }
 
 func newPeerandInfo(t *testing.T, myAs, as uint32, address string, rib *table.TableManager) *peer {
-	nConf := &oc.Neighbor{Config: oc.NeighborConfig{PeerAs: as, NeighborAddress: address}, State: oc.NeighborState{PeerAs: as, NeighborAddress: address, RemoteRouterId: address}}
+	addr := netip.MustParseAddr(address)
+	nConf := &oc.Neighbor{Config: oc.NeighborConfig{PeerAs: as, NeighborAddress: addr}, State: oc.NeighborState{PeerAs: as, NeighborAddress: netip.MustParseAddr(address), RemoteRouterId: addr}}
 	gConf := &oc.Global{Config: oc.GlobalConfig{As: myAs}}
 	err := oc.SetDefaultNeighborConfigValues(nConf, nil, gConf)
 	assert.NoError(t, err)
@@ -973,12 +1082,15 @@ func newPeerandInfo(t *testing.T, myAs, as uint32, address string, rib *table.Ta
 	p := newPeer(
 		&oc.Global{Config: oc.GlobalConfig{As: myAs}},
 		nConf,
+		bgp.BGP_FSM_IDLE,
 		rib,
 		policy,
 		logger)
+	rfmap := make(map[bgp.Family]bgp.BGPAddPathMode)
 	for _, f := range rib.GetRFlist() {
-		p.fsm.rfMap[f] = bgp.BGP_ADD_PATH_NONE
+		rfmap[f] = bgp.BGP_ADD_PATH_NONE
 	}
+	p.fsm.familyMap.Store(rfmap)
 	remoteAddr := netip.MustParseAddr(address)
 	localAddr := netip.MustParseAddr("1.1.1.1")
 	info := table.NewPeerInfo(gConf, nConf, as, myAs, remoteAddr, localAddr, remoteAddr, localAddr)
@@ -1011,8 +1123,8 @@ func TestFilterpathWitheBGP(t *testing.T) {
 	pa1 := []bgp.PathAttributeInterface{bgp.NewPathAttributeAsPath([]bgp.AsPathParamInterface{bgp.NewAs4PathParam(2, []uint32{p1As})}), bgp.NewPathAttributeLocalPref(200)}
 	pa2 := []bgp.PathAttributeInterface{bgp.NewPathAttributeAsPath([]bgp.AsPathParamInterface{bgp.NewAs4PathParam(2, []uint32{p2As})})}
 
-	path1 := table.NewPath(bgp.RF_IPv4_UC, p1.peerInfo, nlri, false, pa1, time.Now(), false)
-	path2 := table.NewPath(bgp.RF_IPv4_UC, p2.peerInfo, nlri, false, pa2, time.Now(), false)
+	path1 := table.NewPath(bgp.RF_IPv4_UC, p1.peerInfo, bgp.PathNLRI{NLRI: nlri}, false, pa1, time.Now(), false)
+	path2 := table.NewPath(bgp.RF_IPv4_UC, p2.peerInfo, bgp.PathNLRI{NLRI: nlri}, false, pa2, time.Now(), false)
 	rib.Update(path2)
 	d := rib.Update(path1)
 	new, old, _ := d[0].GetChanges(table.GLOBAL_RIB_NAME, 0, false)
@@ -1053,8 +1165,8 @@ func TestFilterpathWithiBGP(t *testing.T) {
 	pa1 := []bgp.PathAttributeInterface{bgp.NewPathAttributeAsPath([]bgp.AsPathParamInterface{bgp.NewAs4PathParam(2, []uint32{as})}), bgp.NewPathAttributeLocalPref(200)}
 	// pa2 := []bgp.PathAttributeInterface{bgp.NewPathAttributeAsPath([]bgp.AsPathParamInterface{bgp.NewAs4PathParam(2, []uint32{as})})}
 
-	path1 := table.NewPath(bgp.RF_IPv4_UC, p1.peerInfo, nlri, false, pa1, time.Now(), false)
-	// path2 := table.NewPath(bgp.RF_IPv4_UC, pi2, nlri, false, pa2, time.Now(), false)
+	path1 := table.NewPath(bgp.RF_IPv4_UC, p1.peerInfo, bgp.PathNLRI{NLRI: nlri}, false, pa1, time.Now(), false)
+	// path2 := table.NewPath(bgp.RF_IPv4_UC, pi2, bgp.PathNLRI{NLRI: nlri}, false, pa2, time.Now(), false)
 
 	new, old := process(rib, []*table.Path{path1})
 	assert.Equal(t, new, path1)
@@ -1119,7 +1231,7 @@ func TestFilterpathWithRejectPolicy(t *testing.T) {
 		if addCommunity {
 			pa1 = append(pa1, bgp.NewPathAttributeCommunities([]uint32{100<<16 | 100}))
 		}
-		path1 := table.NewPath(bgp.RF_IPv4_UC, p1.peerInfo, nlri, false, pa1, time.Now(), false)
+		path1 := table.NewPath(bgp.RF_IPv4_UC, p1.peerInfo, bgp.PathNLRI{NLRI: nlri}, false, pa1, time.Now(), false)
 		new, old := process(rib2, []*table.Path{path1})
 		assert.Equal(t, new, path1)
 		s := NewBgpServer()
@@ -1135,9 +1247,11 @@ func TestFilterpathWithRejectPolicy(t *testing.T) {
 func TestPeerGroup(test *testing.T) {
 	assert := assert.New(test)
 	s := NewBgpServer()
-	s.logger.SetLevel(log.DebugLevel)
+	err := s.SetLogLevel(context.Background(), &api.SetLogLevelRequest{Level: api.SetLogLevelRequest_LEVEL_DEBUG})
+	assert.NoError(err)
+
 	go s.Serve()
-	err := s.StartBgp(context.Background(), &api.StartBgpRequest{
+	err = s.StartBgp(context.Background(), &api.StartBgpRequest{
 		Global: &api.Global{
 			Asn:        1,
 			RouterId:   "1.1.1.1",
@@ -1158,7 +1272,7 @@ func TestPeerGroup(test *testing.T) {
 
 	n := &oc.Neighbor{
 		Config: oc.NeighborConfig{
-			NeighborAddress: "127.0.0.1",
+			NeighborAddress: netip.MustParseAddr("127.0.0.1"),
 			PeerGroup:       "g",
 		},
 		Transport: oc.Transport{
@@ -1196,7 +1310,7 @@ func TestPeerGroup(test *testing.T) {
 
 	m := &oc.Neighbor{
 		Config: oc.NeighborConfig{
-			NeighborAddress: "127.0.0.1",
+			NeighborAddress: netip.MustParseAddr("127.0.0.1"),
 			PeerAs:          1,
 		},
 		Transport: oc.Transport{
@@ -1223,9 +1337,10 @@ func TestPeerGroup(test *testing.T) {
 func TestDynamicNeighbor(t *testing.T) {
 	assert := assert.New(t)
 	s1 := NewBgpServer()
-	s1.logger.SetLevel(log.DebugLevel)
+	err := s1.SetLogLevel(context.Background(), &api.SetLogLevelRequest{Level: api.SetLogLevelRequest_LEVEL_DEBUG})
+	assert.NoError(err)
 	go s1.Serve()
-	err := s1.StartBgp(context.Background(), &api.StartBgpRequest{
+	err = s1.StartBgp(context.Background(), &api.StartBgpRequest{
 		Global: &api.Global{
 			Asn:        1,
 			RouterId:   "1.1.1.1",
@@ -1267,7 +1382,7 @@ func TestDynamicNeighbor(t *testing.T) {
 
 	m := &oc.Neighbor{
 		Config: oc.NeighborConfig{
-			NeighborAddress: "127.0.0.1",
+			NeighborAddress: netip.MustParseAddr("127.0.0.1"),
 			PeerAs:          1,
 		},
 		Transport: oc.Transport{
@@ -1351,7 +1466,6 @@ func TestGracefulRestartTimerExpired(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer s2.StopBgp(context.Background(), &api.StopBgpRequest{})
 
 	p2 := &api.Peer{
 		Conf: &api.PeerConf{
@@ -1474,7 +1588,7 @@ func TestTcpConnectionClosedAfterPeerDel(t *testing.T) {
 
 	// We delete the peer incoming channel from the server list so that we can
 	// intercept the transition from ACTIVE state to OPENSENT state.
-	neighbor1 := s1.neighborMap[p1.Conf.NeighborAddress]
+	neighbor1 := s1.neighborMap[netip.MustParseAddr(p1.Conf.NeighborAddress)]
 	// incoming := neighbor1.fsm.h.msgCh
 	// err = s1.mgmtOperation(func() error {
 	// 	s1.delIncoming(incoming)
@@ -1592,48 +1706,65 @@ func runNewServer(t *testing.T, as uint32, routerID string, listenPort int32) *B
 	return s
 }
 
-func peerServers(t *testing.T, ctx context.Context, servers []*BgpServer, families []oc.AfiSafiType) error {
+type peerOption func(peer *BgpServer, g *oc.Global, p *oc.Neighbor)
+
+func setPeerAddressOpt(peer *BgpServer, g *oc.Global, p *oc.Neighbor) {
+	p.Transport.Config.LocalAddress = g.Config.LocalAddressList[0]
+	p.Config.NeighborAddress = peer.bgpConfig.Global.Config.LocalAddressList[0]
+}
+
+func peerTwoServers(t *testing.T, ctx context.Context, server, peer *BgpServer, families []oc.AfiSafiType, isPassive bool, opts ...peerOption) error {
+	neighborConfig := &oc.Neighbor{
+		Config: oc.NeighborConfig{
+			NeighborAddress: netip.MustParseAddr("127.0.0.1"),
+			PeerAs:          peer.bgpConfig.Global.Config.As,
+		},
+		AfiSafis: oc.AfiSafis{},
+		Transport: oc.Transport{
+			Config: oc.TransportConfig{
+				RemotePort: uint16(peer.bgpConfig.Global.Config.Port),
+			},
+		},
+		Timers: oc.Timers{
+			Config: oc.TimersConfig{
+				ConnectRetry:           1,
+				IdleHoldTimeAfterReset: 1,
+			},
+		},
+	}
+
+	for _, opt := range opts {
+		opt(peer, &server.bgpConfig.Global, neighborConfig)
+	}
+
+	if isPassive {
+		neighborConfig.Transport.Config.PassiveMode = true
+	}
+
+	for _, family := range families {
+		neighborConfig.AfiSafis = append(neighborConfig.AfiSafis, oc.AfiSafi{
+			Config: oc.AfiSafiConfig{
+				AfiSafiName: family,
+				Enabled:     true,
+			},
+		})
+	}
+
+	if err := server.AddPeer(ctx, &api.AddPeerRequest{Peer: oc.NewPeerFromConfigStruct(neighborConfig)}); err != nil {
+		t.Fatal(err)
+	}
+	return nil
+}
+
+func peerServers(t *testing.T, ctx context.Context, servers []*BgpServer, families []oc.AfiSafiType, opts ...peerOption) error {
 	for i, server := range servers {
 		for j, peer := range servers {
 			if i == j {
 				continue
 			}
-
-			neighborConfig := &oc.Neighbor{
-				Config: oc.NeighborConfig{
-					NeighborAddress: "127.0.0.1",
-					PeerAs:          peer.bgpConfig.Global.Config.As,
-				},
-				AfiSafis: oc.AfiSafis{},
-				Transport: oc.Transport{
-					Config: oc.TransportConfig{
-						RemotePort: uint16(peer.bgpConfig.Global.Config.Port),
-					},
-				},
-				Timers: oc.Timers{
-					Config: oc.TimersConfig{
-						ConnectRetry:           1,
-						IdleHoldTimeAfterReset: 1,
-					},
-				},
-			}
-
 			// first server to get neighbor config is passive to hopefully make handshake faster
-			if j > i {
-				neighborConfig.Transport.Config.PassiveMode = true
-			}
-
-			for _, family := range families {
-				neighborConfig.AfiSafis = append(neighborConfig.AfiSafis, oc.AfiSafi{
-					Config: oc.AfiSafiConfig{
-						AfiSafiName: family,
-						Enabled:     true,
-					},
-				})
-			}
-
-			if err := server.AddPeer(ctx, &api.AddPeerRequest{Peer: oc.NewPeerFromConfigStruct(neighborConfig)}); err != nil {
-				t.Fatal(err)
+			if err := peerTwoServers(t, ctx, server, peer, families, i < j, opts...); err != nil {
+				return err
 			}
 		}
 	}
@@ -1699,9 +1830,11 @@ func TestDoNotReactToDuplicateRTCMemberships(t *testing.T) {
 	ctx := context.Background()
 
 	s1 := runNewServer(t, 1, "1.1.1.1", 10179)
-	s1.logger.SetLevel(log.DebugLevel)
+	err := s1.SetLogLevel(context.Background(), &api.SetLogLevelRequest{Level: api.SetLogLevelRequest_LEVEL_DEBUG})
+	assert.NoError(t, err)
 	s2 := runNewServer(t, 1, "2.2.2.2", 20179)
-	s2.logger.SetLevel(log.DebugLevel)
+	err = s2.SetLogLevel(context.Background(), &api.SetLogLevelRequest{Level: api.SetLogLevelRequest_LEVEL_DEBUG})
+	assert.NoError(t, err)
 
 	addVrf(t, s1, "vrf1", "111:111", []string{"111:111"}, []string{"111:111"}, 1)
 	addVrf(t, s2, "vrf1", "111:111", []string{"111:111"}, []string{"111:111"}, 1)
@@ -1711,10 +1844,11 @@ func TestDoNotReactToDuplicateRTCMemberships(t *testing.T) {
 	}
 	watcher := s1.watch(WatchUpdate(true, "", ""))
 
+	panh1, _ := bgp.NewPathAttributeNextHop(netip.MustParseAddr("2.2.2.2"))
 	// Add route to vrf1 on s2
 	attrs := []bgp.PathAttributeInterface{
 		bgp.NewPathAttributeOrigin(0),
-		bgp.NewPathAttributeNextHop("2.2.2.2"),
+		panh1,
 	}
 	prefix, _ := bgp.NewIPAddrPrefix(netip.MustParsePrefix("10.30.2.0/24"))
 	path, _ := apiutil.NewPath(bgp.RF_IPv4_UC, prefix, false, attrs, time.Now())
@@ -1758,18 +1892,19 @@ func TestDoNotReactToDuplicateRTCMemberships(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	panh2, _ := bgp.NewPathAttributeNextHop(netip.MustParseAddr("1.1.1.1"))
 	rtcNLRI := bgp.NewRouteTargetMembershipNLRI(1, rt)
 	rtcPath := table.NewPath(bgp.RF_RTC_UC, &table.PeerInfo{
 		AS:      1,
 		Address: netip.MustParseAddr("127.0.0.1"),
 		LocalID: netip.MustParseAddr("2.2.2.2"),
 		ID:      netip.MustParseAddr("1.1.1.1"),
-	}, rtcNLRI, false, []bgp.PathAttributeInterface{
+	}, bgp.PathNLRI{NLRI: rtcNLRI}, false, []bgp.PathAttributeInterface{
 		bgp.NewPathAttributeOrigin(0),
-		bgp.NewPathAttributeNextHop("1.1.1.1"),
+		panh2,
 	}, time.Now(), false)
 
-	s1Peer := s2.neighborMap["127.0.0.1"]
+	s1Peer := s2.neighborMap[netip.MustParseAddr("127.0.0.1")]
 	s2.propagateUpdate(s1Peer, []*table.Path{rtcPath})
 
 	t2 := time.NewTimer(2 * time.Second)
@@ -1802,10 +1937,12 @@ func TestDelVrfWithRTC(t *testing.T) {
 
 	s1 := runNewServer(t, 1, "1.1.1.1", 10179)
 	defer s1.StopBgp(context.Background(), &api.StopBgpRequest{})
-	s1.logger.SetLevel(log.DebugLevel)
+	err := s1.SetLogLevel(context.Background(), &api.SetLogLevelRequest{Level: api.SetLogLevelRequest_LEVEL_DEBUG})
+	assert.NoError(t, err)
 	s2 := runNewServer(t, 1, "2.2.2.2", 20179)
 	defer s2.StopBgp(context.Background(), &api.StopBgpRequest{})
-	s2.logger.SetLevel(log.DebugLevel)
+	err = s2.SetLogLevel(context.Background(), &api.SetLogLevelRequest{Level: api.SetLogLevelRequest_LEVEL_DEBUG})
+	assert.NoError(t, err)
 
 	addVrf(t, s1, "vrf1", "111:111", []string{"111:111"}, []string{}, 1)
 	addVrf(t, s2, "vrf1", "111:111", []string{}, []string{"111:111"}, 1)
@@ -1816,10 +1953,11 @@ func TestDelVrfWithRTC(t *testing.T) {
 	watcher1 := s1.watch(WatchUpdate(true, "", ""))
 	watcher2 := s2.watch(WatchUpdate(true, "", ""))
 
+	panh, _ := bgp.NewPathAttributeNextHop(netip.MustParseAddr("2.2.2.2"))
 	// Add route to vrf1 on s2
 	attrs := []bgp.PathAttributeInterface{
 		bgp.NewPathAttributeOrigin(0),
-		bgp.NewPathAttributeNextHop("2.2.2.2"),
+		panh,
 		bgp.NewPathAttributeExtendedCommunities([]bgp.ExtendedCommunityInterface{
 			bgp.NewTwoOctetAsSpecificExtended(bgp.EC_SUBTYPE_ROUTE_TARGET, 100, 100, true),
 		}),
@@ -1907,10 +2045,12 @@ func TestSameRTCMessagesWithOneDifferrence(t *testing.T) {
 
 	s1 := runNewServer(t, 1, "1.1.1.1", 10179)
 	defer s1.StopBgp(context.Background(), &api.StopBgpRequest{})
-	s1.logger.SetLevel(log.DebugLevel)
+	err := s1.SetLogLevel(context.Background(), &api.SetLogLevelRequest{Level: api.SetLogLevelRequest_LEVEL_DEBUG})
+	assert.NoError(t, err)
 	s2 := runNewServer(t, 1, "2.2.2.2", 20179)
 	defer s2.StopBgp(context.Background(), &api.StopBgpRequest{})
-	s2.logger.SetLevel(log.DebugLevel)
+	err = s2.SetLogLevel(context.Background(), &api.SetLogLevelRequest{Level: api.SetLogLevelRequest_LEVEL_DEBUG})
+	assert.NoError(t, err)
 
 	if err := peerServers(t, ctx, []*BgpServer{s1, s2}, []oc.AfiSafiType{oc.AFI_SAFI_TYPE_L3VPN_IPV4_UNICAST, oc.AFI_SAFI_TYPE_RTC}); err != nil {
 		t.Fatal(err)
@@ -1920,24 +2060,26 @@ func TestSameRTCMessagesWithOneDifferrence(t *testing.T) {
 
 	rt := bgp.NewTwoOctetAsSpecificExtended(bgp.EC_SUBTYPE_ROUTE_TARGET, 100, 100, true)
 
+	panh, _ := bgp.NewPathAttributeNextHop(netip.MustParseAddr("3.3.3.3"))
 	// VPN Path:
 	attrs := []bgp.PathAttributeInterface{
 		bgp.NewPathAttributeOrigin(0),
-		bgp.NewPathAttributeNextHop("3.3.3.3"),
+		panh,
 		bgp.NewPathAttributeExtendedCommunities([]bgp.ExtendedCommunityInterface{rt}),
 	}
 	rd, _ := bgp.ParseRouteDistinguisher("100:100")
 	labels := bgp.NewMPLSLabelStack(100, 200)
-	prefix := bgp.NewLabeledVPNIPAddrPrefix(24, "10.30.2.0", *labels, rd)
+	prefix, _ := bgp.NewLabeledVPNIPAddrPrefix(netip.MustParsePrefix("10.30.2.0/24"), *labels, rd)
 	path, _ := apiutil.NewPath(bgp.RF_IPv4_VPN, prefix, false, attrs, time.Now())
 
 	if _, err := s2.AddPath(apiutil.AddPathRequest{Paths: []*apiutil.Path{mustApi2apiutilPath(path)}}); err != nil {
 		t.Fatal(err)
 	}
 
+	panh, _ = bgp.NewPathAttributeNextHop(netip.IPv4Unspecified())
 	attrsNH0 := []bgp.PathAttributeInterface{
 		bgp.NewPathAttributeOrigin(0),
-		bgp.NewPathAttributeNextHop("0.0.0.0"),
+		panh,
 	}
 	pathRtc0, _ := apiutil.NewPath(bgp.RF_RTC_UC, bgp.NewRouteTargetMembershipNLRI(1, rt), false, attrsNH0, time.Now())
 	if _, err := s1.AddPath(apiutil.AddPathRequest{Paths: []*apiutil.Path{mustApi2apiutilPath(pathRtc0)}}); err != nil {
@@ -1974,7 +2116,7 @@ func TestSameRTCMessagesWithOneDifferrence(t *testing.T) {
 	attrsNH1 := []bgp.PathAttributeInterface{
 		bgp.NewPathAttributeOrigin(0),
 		bgp.NewPathAttributeExtendedCommunities([]bgp.ExtendedCommunityInterface{rt200}),
-		bgp.NewPathAttributeNextHop("0.0.0.0"),
+		panh,
 	}
 	pathRtc1, _ := apiutil.NewPath(bgp.RF_RTC_UC, bgp.NewRouteTargetMembershipNLRI(1, rt), false, attrsNH1, time.Now())
 	if _, err := s1.AddPath(apiutil.AddPathRequest{Paths: []*apiutil.Path{mustApi2apiutilPath(pathRtc1)}}); err != nil {
@@ -2030,6 +2172,112 @@ func TestSameRTCMessagesWithOneDifferrence(t *testing.T) {
 	t1.Stop()
 }
 
+func TestRTCWithdrawUpdatedPath(t *testing.T) {
+	ctx := context.Background()
+
+	s1 := runNewServer(t, 1, "1.1.1.1", 10179)
+	defer s1.StopBgp(context.Background(), &api.StopBgpRequest{})
+	err := s1.SetLogLevel(context.Background(), &api.SetLogLevelRequest{Level: api.SetLogLevelRequest_LEVEL_DEBUG})
+	assert.NoError(t, err)
+	s2 := runNewServer(t, 1, "2.2.2.2", 20179)
+	defer s2.StopBgp(context.Background(), &api.StopBgpRequest{})
+	err = s2.SetLogLevel(context.Background(), &api.SetLogLevelRequest{Level: api.SetLogLevelRequest_LEVEL_DEBUG})
+	assert.NoError(t, err)
+
+	if err := peerServers(t, ctx, []*BgpServer{s1, s2}, []oc.AfiSafiType{oc.AFI_SAFI_TYPE_L3VPN_IPV4_UNICAST, oc.AFI_SAFI_TYPE_RTC}); err != nil {
+		t.Fatal(err)
+	}
+	watcher1 := s1.watch(WatchUpdate(true, "", ""))
+
+	rt1 := bgp.NewTwoOctetAsSpecificExtended(bgp.EC_SUBTYPE_ROUTE_TARGET, 100, 100, true)
+	rt2 := bgp.NewTwoOctetAsSpecificExtended(bgp.EC_SUBTYPE_ROUTE_TARGET, 200, 200, true)
+
+	panh, _ := bgp.NewPathAttributeNextHop(netip.MustParseAddr("3.3.3.3"))
+	// VPN Path:
+	attrs12 := []bgp.PathAttributeInterface{
+		bgp.NewPathAttributeOrigin(0),
+		panh,
+		bgp.NewPathAttributeExtendedCommunities([]bgp.ExtendedCommunityInterface{rt1, rt2}),
+	}
+	attrs1 := []bgp.PathAttributeInterface{
+		bgp.NewPathAttributeOrigin(0),
+		panh,
+		bgp.NewPathAttributeExtendedCommunities([]bgp.ExtendedCommunityInterface{rt1}),
+	}
+	rd, _ := bgp.ParseRouteDistinguisher("100:100")
+	labels := bgp.NewMPLSLabelStack(100, 200)
+	prefix, _ := bgp.NewLabeledVPNIPAddrPrefix(netip.MustParsePrefix("10.30.2.0/24"), *labels, rd)
+	path12, _ := apiutil.NewPath(bgp.RF_IPv4_VPN, prefix, false, attrs12, time.Now())
+	path1, _ := apiutil.NewPath(bgp.RF_IPv4_VPN, prefix, false, attrs1, time.Now())
+
+	if _, err := s2.AddPath(apiutil.AddPathRequest{Paths: []*apiutil.Path{mustApi2apiutilPath(path12)}}); err != nil {
+		t.Fatal(err)
+	}
+
+	panh, _ = bgp.NewPathAttributeNextHop(netip.IPv4Unspecified())
+	attrsNH0 := []bgp.PathAttributeInterface{
+		bgp.NewPathAttributeOrigin(0),
+		panh,
+	}
+	pathRtc0, _ := apiutil.NewPath(bgp.RF_RTC_UC, bgp.NewRouteTargetMembershipNLRI(1, rt2), false, attrsNH0, time.Now())
+	if _, err := s1.AddPath(apiutil.AddPathRequest{Paths: []*apiutil.Path{mustApi2apiutilPath(pathRtc0)}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// s1 should receive this route from s2
+	t1 := time.NewTimer(30 * time.Second)
+	for found := false; !found; {
+		select {
+		case ev := <-watcher1.Event():
+			switch msg := ev.(type) {
+			case *watchEventUpdate:
+				for _, path := range msg.PathList {
+					t.Logf("tester received path: %s", path.String())
+					if vpnPath, ok := path.GetNlri().(*bgp.LabeledVPNIPAddrPrefix); ok {
+						if vpnPath.Prefix == prefix.Prefix {
+							t.Logf("tester found expected prefix: %s", vpnPath.Prefix)
+							found = true
+						} else {
+							t.Logf("unknown prefix %s != %s", vpnPath.Prefix, prefix.Prefix)
+						}
+					}
+				}
+			}
+		case <-t1.C:
+			t.Fatalf("timeout while waiting for update path event")
+		}
+	}
+	t1.Stop()
+
+	if _, err := s2.AddPath(apiutil.AddPathRequest{Paths: []*apiutil.Path{mustApi2apiutilPath(path1)}}); err != nil {
+		t.Fatal(err)
+	}
+
+	t1 = time.NewTimer(30 * time.Second)
+	for found := false; !found; {
+		select {
+		case ev := <-watcher1.Event():
+			switch msg := ev.(type) {
+			case *watchEventUpdate:
+				for _, path := range msg.PathList {
+					t.Logf("tester received path: %s", path.String())
+					if vpnPath, ok := path.GetNlri().(*bgp.LabeledVPNIPAddrPrefix); ok {
+						if vpnPath.Prefix == prefix.Prefix && path.IsWithdraw {
+							t.Logf("tester found expected withdrawn prefix: %s", vpnPath.Prefix)
+							found = true
+						} else {
+							t.Logf("unknown prefix %s != %s", vpnPath.Prefix, prefix.Prefix)
+						}
+					}
+				}
+			}
+		case <-t1.C:
+			t.Fatalf("timeout while waiting for update path event")
+		}
+	}
+	t1.Stop()
+}
+
 func TestAddDeletePath(t *testing.T) {
 	s := runNewServer(t, 1, "1.1.1.1", 10179)
 	defer s.StopBgp(context.Background(), &api.StopBgpRequest{})
@@ -2071,7 +2319,7 @@ func TestAddDeletePath(t *testing.T) {
 
 	listRib := func(f bgp.Family) []*api.Destination {
 		l := make([]*api.Destination, 0)
-		err := s.ListPath(apiutil.ListPathRequest{TableType: api.TableType_TABLE_TYPE_GLOBAL, Family: f}, func(prefix bgp.AddrPrefixInterface, paths []*apiutil.Path) {
+		err := s.ListPath(apiutil.ListPathRequest{TableType: api.TableType_TABLE_TYPE_GLOBAL, Family: f}, func(prefix bgp.NLRI, paths []*apiutil.Path) {
 			d := api.Destination{
 				Prefix: prefix.String(),
 				Paths:  make([]*api.Path, len(paths)),
@@ -2261,8 +2509,8 @@ func TestAddDeletePath(t *testing.T) {
 func TestDeleteNonExistingVrf(t *testing.T) {
 	s := runNewServer(t, 1, "1.1.1.1", 10179)
 	defer s.StopBgp(context.Background(), &api.StopBgpRequest{})
-
-	s.logger.SetLevel(log.DebugLevel)
+	err := s.SetLogLevel(context.Background(), &api.SetLogLevelRequest{Level: api.SetLogLevelRequest_LEVEL_DEBUG})
+	assert.NoError(t, err)
 
 	addVrf(t, s, "vrf1", "111:111", []string{"111:111"}, []string{"111:111"}, 1)
 	req := &api.DeleteVrfRequest{Name: "Invalidvrf"}
@@ -2274,8 +2522,8 @@ func TestDeleteNonExistingVrf(t *testing.T) {
 func TestDeleteVrf(t *testing.T) {
 	s := runNewServer(t, 1, "1.1.1.1", 10179)
 	defer s.StopBgp(context.Background(), &api.StopBgpRequest{})
-
-	s.logger.SetLevel(log.DebugLevel)
+	err := s.SetLogLevel(context.Background(), &api.SetLogLevelRequest{Level: api.SetLogLevelRequest_LEVEL_DEBUG})
+	assert.NoError(t, err)
 
 	addVrf(t, s, "vrf1", "111:111", []string{"111:111"}, []string{"111:111"}, 1)
 	req := &api.DeleteVrfRequest{Name: "vrf1"}
@@ -2382,7 +2630,7 @@ func TestListPathWithIdentifiers(t *testing.T) {
 			Name:      name,
 			TableType: tableType,
 			Family:    family,
-		}, func(prefix bgp.AddrPrefixInterface, paths []*apiutil.Path) {
+		}, func(prefix bgp.NLRI, paths []*apiutil.Path) {
 			d := api.Destination{
 				Prefix: prefix.String(),
 				Paths:  make([]*api.Path, len(paths)),
@@ -2428,7 +2676,7 @@ func TestListPathWithIdentifiers(t *testing.T) {
 func makeNeighborConfig(port int32) *oc.Neighbor {
 	return &oc.Neighbor{
 		Config: oc.NeighborConfig{
-			NeighborAddress: "127.0.0.1",
+			NeighborAddress: netip.MustParseAddr("127.0.0.1"),
 		},
 		Transport: oc.Transport{
 			Config: oc.TransportConfig{
@@ -2458,19 +2706,20 @@ func TestRTCDefferalTime(test *testing.T) {
 	rt100 := bgp.NewTwoOctetAsSpecificExtended(bgp.EC_SUBTYPE_ROUTE_TARGET, 100, 100, true)
 	rt200 := bgp.NewTwoOctetAsSpecificExtended(bgp.EC_SUBTYPE_ROUTE_TARGET, 200, 200, true)
 
+	panh, _ := bgp.NewPathAttributeNextHop(netip.MustParseAddr("3.3.3.3"))
 	attrs100 := []bgp.PathAttributeInterface{
 		bgp.NewPathAttributeOrigin(0),
-		bgp.NewPathAttributeNextHop("3.3.3.3"),
+		panh,
 		bgp.NewPathAttributeExtendedCommunities([]bgp.ExtendedCommunityInterface{rt100}),
 	}
 	attrs200 := []bgp.PathAttributeInterface{
 		bgp.NewPathAttributeOrigin(0),
-		bgp.NewPathAttributeNextHop("3.3.3.3"),
+		panh,
 		bgp.NewPathAttributeExtendedCommunities([]bgp.ExtendedCommunityInterface{rt200}),
 	}
 	attrs100200 := []bgp.PathAttributeInterface{
 		bgp.NewPathAttributeOrigin(0),
-		bgp.NewPathAttributeNextHop("3.3.3.3"),
+		panh,
 		bgp.NewPathAttributeExtendedCommunities([]bgp.ExtendedCommunityInterface{rt200, rt100}),
 	}
 	labels := bgp.NewMPLSLabelStack(100)
@@ -2480,7 +2729,7 @@ func TestRTCDefferalTime(test *testing.T) {
 	// Add 60 paths with one RT that should be received.
 	for i := range 60 {
 		rd, _ := bgp.ParseRouteDistinguisher(fmt.Sprintf("100:%d", i+100))
-		prefix := bgp.NewLabeledVPNIPAddrPrefix(24, "10.30.2.0", *labels, rd)
+		prefix, _ := bgp.NewLabeledVPNIPAddrPrefix(netip.MustParsePrefix("10.30.2.0/24"), *labels, rd)
 		path, _ := apiutil.NewPath(bgp.RF_IPv4_VPN, prefix, false, attrs100, time.Now())
 
 		if _, err := sender.AddPath(apiutil.AddPathRequest{Paths: []*apiutil.Path{mustApi2apiutilPath(path)}}); err != nil {
@@ -2492,7 +2741,7 @@ func TestRTCDefferalTime(test *testing.T) {
 	// Add 60 paths with two RT that should be received (for one of RT).
 	for i := range 40 {
 		rd, _ := bgp.ParseRouteDistinguisher(fmt.Sprintf("100:%d", i+100))
-		prefix := bgp.NewLabeledVPNIPAddrPrefix(24, "20.30.2.0", *labels, rd)
+		prefix, _ := bgp.NewLabeledVPNIPAddrPrefix(netip.MustParsePrefix("20.30.2.0/24"), *labels, rd)
 		path, _ := apiutil.NewPath(bgp.RF_IPv4_VPN, prefix, false, attrs100200, time.Now())
 
 		if _, err := sender.AddPath(apiutil.AddPathRequest{Paths: []*apiutil.Path{mustApi2apiutilPath(path)}}); err != nil {
@@ -2504,7 +2753,7 @@ func TestRTCDefferalTime(test *testing.T) {
 	// Add 5 paths with one RT that should not be received.
 	for i := range 5 {
 		rd, _ := bgp.ParseRouteDistinguisher(fmt.Sprintf("100:%d", i+100))
-		prefix := bgp.NewLabeledVPNIPAddrPrefix(24, "5.30.2.0", *labels, rd)
+		prefix, _ := bgp.NewLabeledVPNIPAddrPrefix(netip.MustParsePrefix("5.30.2.0/24"), *labels, rd)
 		path, _ := apiutil.NewPath(bgp.RF_IPv4_VPN, prefix, false, attrs200, time.Now())
 
 		if _, err := sender.AddPath(apiutil.AddPathRequest{Paths: []*apiutil.Path{mustApi2apiutilPath(path)}}); err != nil {
@@ -2512,9 +2761,10 @@ func TestRTCDefferalTime(test *testing.T) {
 		}
 	}
 
+	panhrtc, _ := bgp.NewPathAttributeNextHop(netip.IPv4Unspecified())
 	attrsRtc := []bgp.PathAttributeInterface{
 		bgp.NewPathAttributeOrigin(0),
-		bgp.NewPathAttributeNextHop("0.0.0.0"),
+		panhrtc,
 	}
 
 	// Add 40 paths with different RTs that should be received.
@@ -2523,12 +2773,12 @@ func TestRTCDefferalTime(test *testing.T) {
 
 		attrs := []bgp.PathAttributeInterface{
 			bgp.NewPathAttributeOrigin(0),
-			bgp.NewPathAttributeNextHop("3.3.3.3"),
+			panh,
 			bgp.NewPathAttributeExtendedCommunities([]bgp.ExtendedCommunityInterface{rt}),
 		}
 
 		rd, _ := bgp.ParseRouteDistinguisher(fmt.Sprintf("%d:%d", uint16(10+i), 100))
-		prefix := bgp.NewLabeledVPNIPAddrPrefix(24, "20.30.3.0", *labels, rd)
+		prefix, _ := bgp.NewLabeledVPNIPAddrPrefix(netip.MustParsePrefix("20.30.3.0/24"), *labels, rd)
 		path, _ := apiutil.NewPath(bgp.RF_IPv4_VPN, prefix, false, attrs, time.Now())
 
 		if _, err := sender.AddPath(apiutil.AddPathRequest{Paths: []*apiutil.Path{mustApi2apiutilPath(path)}}); err != nil {
@@ -2548,12 +2798,12 @@ func TestRTCDefferalTime(test *testing.T) {
 
 		attrs := []bgp.PathAttributeInterface{
 			bgp.NewPathAttributeOrigin(0),
-			bgp.NewPathAttributeNextHop("3.3.3.3"),
+			panh,
 			bgp.NewPathAttributeExtendedCommunities([]bgp.ExtendedCommunityInterface{rt}),
 		}
 
 		rd, _ := bgp.ParseRouteDistinguisher(fmt.Sprintf("%d:%d", uint16(50+i), 100))
-		prefix := bgp.NewLabeledVPNIPAddrPrefix(24, "5.30.2.0", *labels, rd)
+		prefix, _ := bgp.NewLabeledVPNIPAddrPrefix(netip.MustParsePrefix("5.30.2.0/24"), *labels, rd)
 		path, _ := apiutil.NewPath(bgp.RF_IPv4_VPN, prefix, false, attrs, time.Now())
 
 		if _, err := sender.AddPath(apiutil.AddPathRequest{Paths: []*apiutil.Path{mustApi2apiutilPath(path)}}); err != nil {
@@ -2816,16 +3066,18 @@ func TestWatchEvent(test *testing.T) {
 	watchers.Wait()
 
 	count := 0
+	ctx, cancel := context.WithCancel(context.Background())
 	tableCh := make(chan struct{})
 	f := func(paths []*apiutil.Path, _ time.Time) {
 		count += len(paths)
 		if len(paths) > 0 && count == 2 {
+			cancel()
 			close(tableCh)
 		}
 	}
 	opts := make([]WatchOption, 0)
 	opts = append(opts, WatchUpdate(true, "127.0.0.1", ""))
-	err = s.WatchEvent(context.Background(), WatchEventMessageCallbacks{
+	err = s.WatchEvent(ctx, WatchEventMessageCallbacks{
 		OnPathUpdate: f,
 	}, opts...)
 	assert.NoError(err)
@@ -2889,4 +3141,115 @@ func TestAddDefinedSetReplace(t *testing.T) {
 	assert.Equal(1, len(ns))
 	assert.Equal("replaceme", ns[0].Name)
 	assert.Equal([]string{"203.0.113.2/32"}, ns[0].List)
+}
+
+func TestEBGPRouteStuck(test *testing.T) {
+	var peers []*BgpServer
+	for i, s := range []struct {
+		routerId string
+		asn      uint32
+	}{
+		{routerId: "1.1.1.1", asn: 1},
+		{routerId: "2.2.2.1", asn: 2},
+		{routerId: "2.2.2.2", asn: 2},
+	} {
+		peer := NewBgpServer()
+		go peer.Serve()
+
+		peers = append(peers, peer)
+
+		err := peer.StartBgp(context.Background(), &api.StartBgpRequest{
+			Global: &api.Global{
+				Asn:             s.asn,
+				RouterId:        s.routerId,
+				ListenAddresses: []string{fmt.Sprintf("127.0.0.%d", 100+i)},
+				ListenPort:      10179,
+			},
+		})
+		require.NoError(test, err)
+		defer peer.StopBgp(context.Background(), &api.StopBgpRequest{})
+	}
+
+	wg := waitEstablished(peers[0])
+	wg1 := waitEstablished(peers[1])
+	wg2 := waitEstablished(peers[2])
+	// Use only eBGP
+	for i, server := range peers {
+		for j, peer := range peers {
+			if i == j || server.bgpConfig.Global.Config.As == peer.bgpConfig.Global.Config.As {
+				continue
+			}
+			ctx := context.Background()
+			if err := peerTwoServers(test, ctx, server, peer, []oc.AfiSafiType{oc.AFI_SAFI_TYPE_IPV4_UNICAST}, i < j, setPeerAddressOpt); err != nil {
+				assert.NoError(test, err)
+			}
+		}
+	}
+
+	wg.Wait()
+	wg1.Wait()
+	wg2.Wait()
+
+	family4 := &api.Family{
+		Afi:  api.Family_AFI_IP,
+		Safi: api.Family_SAFI_UNICAST,
+	}
+	attrs := []*api.Attribute{
+		{
+			Attr: &api.Attribute_Origin{Origin: &api.OriginAttribute{
+				Origin: 0,
+			}},
+		},
+		{
+			Attr: &api.Attribute_NextHop{NextHop: &api.NextHopAttribute{
+				NextHop: "10.0.0.1",
+			}},
+		},
+	}
+
+	nlri := &api.NLRI{Nlri: &api.NLRI_Prefix{Prefix: &api.IPAddressPrefix{
+		Prefix:    "10.1.0.0",
+		PrefixLen: 24,
+	}}}
+
+	assertPathCount := func(t assert.TestingT, peer *BgpServer, expected int) {
+		var info *table.TableInfo
+		if peer.active() == nil {
+			info, _ = peer.getRibInfo("", bgp.RF_IPv4_UC)
+		} else {
+			info = peer.globalRib.Tables[bgp.RF_IPv4_UC].Info()
+		}
+		if assert.NotNil(t, info) {
+			assert.Equal(t, expected, info.NumPath)
+		}
+	}
+
+	path := &api.Path{
+		Family: family4,
+		Nlri:   nlri,
+		Pattrs: attrs,
+	}
+	addPaths := func(peers []*BgpServer, path *api.Path) {
+		for _, peer := range peers {
+			_, err := peer.AddPath(apiutil.AddPathRequest{Paths: []*apiutil.Path{mustApi2apiutilPath(path)}})
+			assert.NoError(test, err)
+		}
+	}
+
+	addPaths(peers, path)
+
+	assert.EventuallyWithT(test, func(collect *assert.CollectT) {
+		assertPathCount(collect, peers[0], 3)
+		assertPathCount(collect, peers[1], 2)
+		assertPathCount(collect, peers[2], 2)
+	}, 5*time.Second, 1*time.Millisecond)
+
+	err := peers[0].DeletePath(apiutil.DeletePathRequest{Paths: []*apiutil.Path{mustApi2apiutilPath(path)}})
+	assert.NoError(test, err)
+
+	assert.EventuallyWithT(test, func(collect *assert.CollectT) {
+		assertPathCount(collect, peers[0], 2)
+		assertPathCount(collect, peers[1], 1)
+		assertPathCount(collect, peers[2], 1)
+	}, 20*time.Second, 1*time.Millisecond)
 }

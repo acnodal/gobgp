@@ -2,10 +2,8 @@
 
 ## Building the development environment
 
-You need a working [Go environment](https://golang.org/doc/install) (1.16 or newer).
-
 ```bash
-$ git clone git://github.com/osrg/gobgp
+$ git clone https://github.com/osrg/gobgp.git
 $ cd gobgp && go mod download
 ```
 
@@ -17,9 +15,9 @@ Now ready to modify the code and build two binaries, `cmd/gobgp` and `cmd/gobgpd
 
 In GoBGP, multiple structures are defined to represent the same concept, in order to support multiple APIs. For example, to represent a peer, there are three different structures: `config.Neighbor`, `api.Peer`, and `apiutil.Peer`.
 
-`config.Neighbor` is the structure used by OpenConfig and is generated from YANG files. OpenConfig is a standard that aims to make the configuration and management of vendor-neutral network devices programmable. GoBGP uses OpenConfig as its configuration file API. Since OpenConfig defines data structures in a generic, language-agnostic way, the most suitable Go data types are not always used. For instance, while netip.Addr would be the optimal type to represent a peer’s IP address in Go, OpenConfig instead uses a language-independent string type.
+`config.Neighbor` is the structure used by OpenConfig and is generated from YANG files. OpenConfig is a standard that aims to make the configuration and management of vendor-neutral network devices programmable. GoBGP uses OpenConfig as its configuration file API. Since OpenConfig defines data structures in a generic, language-agnostic way, the most suitable Go data types are not always used. Although it is possible to exert some control over how certain types are mapped to Go, YANG can define constructs such as union types that Go cannot natively represent. In addition, the data layout is designed to be human-readable, which may not always be optimal for the computer in terms of concurrency and locking.
 
-`api.Peer` is the structure used for gRPC and is generated from .proto files. gRPC is the primary API of GoBGP; all control operations can be performed through gRPC. The CLI is also implemented using gRPC. Similar to OpenConfig, gRPC defines data structures with generic, language-independent types to ensure support across different programming languages. This means that the most optimal Go types are not always used. For example, a peer’s IP address is represented as a string rather than the more suitable netip.Addr type.
+`api.Peer` is the structure used for gRPC and is generated from .proto files. gRPC is the primary API of GoBGP; all control operations can be performed through gRPC. The CLI is also implemented using gRPC. Similar to OpenConfig, gRPC defines data structures with generic, language-independent types to ensure support across different programming languages. Unlike OpenConfig, however, there is no way to customize how these types are converted into Go types, which makes it even less convenient. As a result, the most optimal Go types are not always used. For example, a peer’s IP address is represented as a string rather than the more suitable netip.Addr type.
 
 `apiutil.Peer` is what we call the “native API.” While gRPC APIs have the advantage of supporting multiple programming languages, they also come with significant overhead. The native API, on the other hand, is a lightweight API designed specifically for Go. It defines data structures using the most appropriate Go types, such as netip.Addr, to achieve better efficiency and usability.
 
@@ -40,6 +38,12 @@ If you add an 8-byte member to the Destination struture, since the number of Des
 If you add an 8-byte member to the Peer struture, since the number of Peer structures increases proportionally to the number of peers, this would result in approximately 80 bytes increase in memory usage.
 
 Please be cautious about changes that increase memory usage proportionally to the number of routes (and be even more cautious about changes that are proportional to both the number of routes and the number of peers). The benefits must justify such increases (for example, huge performance improvement).
+
+### Locking
+
+GoBGP uses a two-level mutex design to manage concurrent access to shared state. The server-level mutex (`sharedData.mu`) protects global state such as the RIB tables and peer map. All management operations (API calls) and FSM event processing which access to those data are serialized through this mutex. The per-peer mutex (`peer.fsm.lock`) protects individual peer state including configuration and capability negotiation, using a read-write lock to allow concurrent reads while maintaining exclusive writes.
+
+To prevent deadlocks, always follow this lock ordering rule: **acquire the server-level mutex first, then acquire peer-level locks if needed**. Never acquire the server-level mutex while holding a peer-level lock. When modifying code that involves locking, ensure critical sections are kept as short as possible, and consider copying data before releasing locks to minimize contention. The server-level mutex is the primary scalability bottleneck, so any changes affecting lock duration or frequency should be carefully evaluated for performance impact, especially in environments with many peers or large routing tables.
 
 ## Getting your code into GoBGP
 

@@ -16,10 +16,10 @@
 package netlink
 
 import (
+	"log/slog"
 	"net"
 	"testing"
 
-	"github.com/osrg/gobgp/v4/pkg/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/vishvananda/netlink"
 )
@@ -48,13 +48,13 @@ func (m *mockNetlinkManager) LinkByName(name string) (netlink.Link, error) {
 }
 
 func TestNewNetlinkClient(t *testing.T) {
-	logger := log.NewDefaultLogger()
+	logger := slog.Default()
 	_, err := NewNetlinkClient(logger)
 	assert.NoError(t, err)
 }
 
 func TestRouteList(t *testing.T) {
-	logger := log.NewDefaultLogger()
+	logger := slog.Default()
 	client, _ := NewNetlinkClient(logger)
 
 	_, ipNet, _ := net.ParseCIDR("192.168.1.0/24")
@@ -81,7 +81,7 @@ func TestRouteList(t *testing.T) {
 }
 
 func TestAddRoute(t *testing.T) {
-	logger := log.NewDefaultLogger()
+	logger := slog.Default()
 	client, _ := NewNetlinkClient(logger)
 
 	mockManager := &mockNetlinkManager{}

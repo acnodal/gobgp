@@ -1,7 +1,6 @@
 package bgp
 
 import (
-	"encoding/binary"
 	"fmt"
 	"math"
 	"net"
@@ -92,7 +91,7 @@ func ValidateAttribute(a PathAttributeInterface, rfs map[Family]BGPAddPathMode, 
 	eSubCodeUnknown := uint8(BGP_ERROR_SUB_UNRECOGNIZED_WELL_KNOWN_ATTRIBUTE)
 	eSubCodeMalformedAspath := uint8(BGP_ERROR_SUB_MALFORMED_AS_PATH)
 
-	checkPrefix := func(family Family, l []AddrPrefixInterface) error {
+	checkPrefix := func(family Family, l []PathNLRI) error {
 		if _, ok := rfs[family]; !ok {
 			return NewMessageError(0, 0, nil, fmt.Sprintf("Address-family %s not available for this session", family))
 		}
@@ -101,20 +100,7 @@ func ValidateAttribute(a PathAttributeInterface, rfs map[Family]BGPAddPathMode, 
 			switch family {
 			case RF_FS_IPv4_UC, RF_FS_IPv6_UC, RF_FS_IPv4_VPN, RF_FS_IPv6_VPN, RF_FS_L2_VPN:
 				t := BGPFlowSpecType(0)
-				value := make([]FlowSpecComponentInterface, 0)
-				switch family {
-				case RF_FS_IPv4_UC:
-					value = prefix.(*FlowSpecIPv4Unicast).Value
-				case RF_FS_IPv6_UC:
-					value = prefix.(*FlowSpecIPv6Unicast).Value
-				case RF_FS_IPv4_VPN:
-					value = prefix.(*FlowSpecIPv4VPN).Value
-				case RF_FS_IPv6_VPN:
-					value = prefix.(*FlowSpecIPv6VPN).Value
-				case RF_FS_L2_VPN:
-					value = prefix.(*FlowSpecL2VPN).Value
-				}
-				for _, v := range value {
+				for _, v := range prefix.NLRI.(*FlowSpecNLRI).Value {
 					if v.Type() <= t {
 						return NewMessageError(0, 0, nil, fmt.Sprintf("%s nlri violate strict type ordering", family))
 					}
@@ -288,16 +274,6 @@ func validateAsPathValueBytes(data []byte) (bool, error) {
 		return false, nil
 	}
 	return false, NewMessageError(eCode, eSubCode, nil, "can't parse AS_PATH")
-}
-
-func ValidateBGPMessage(m *BGPMessage) error {
-	if m.Header.Len > BGP_MAX_MESSAGE_LENGTH {
-		buf := make([]byte, 2)
-		binary.BigEndian.PutUint16(buf, m.Header.Len)
-		return NewMessageError(BGP_ERROR_MESSAGE_HEADER_ERROR, BGP_ERROR_SUB_BAD_MESSAGE_LENGTH, buf, "too long length")
-	}
-
-	return nil
 }
 
 func ValidateOpenMsg(m *BGPOpen, expectedAS uint32, myAS uint32, myId netip.Addr) (uint32, error) {

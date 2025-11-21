@@ -89,23 +89,27 @@ type LookupPrefix struct {
 // used by server.WatchEventMessages API
 type Path struct {
 	Family             bgp.Family
-	Nlri               bgp.AddrPrefixInterface
-	Attrs              []bgp.PathAttributeInterface
-	Age                int64
-	Best               bool
-	Stale              bool
-	Withdrawal         bool
-	PeerASN            uint32
-	PeerID             netip.Addr
-	PeerAddress        netip.Addr
-	IsFromExternal     bool
-	NoImplicitWithdraw bool
-	IsNexthopInvalid   bool
-	SendMaxFiltered    bool
-	Filtered           bool
-	Validation         *api.Validation
-	IsNetlink          bool
-	NetlinkIfName      string
+	Nlri               bgp.NLRI                     `json:"nlri"`
+	Age                int64                        `json:"age"`
+	Best               bool                         `json:"best"`
+	Attrs              []bgp.PathAttributeInterface `json:"attrs"`
+	Stale              bool                         `json:"stale"`
+	Withdrawal         bool                         `json:"withdrawal,omitempty"`
+	PeerASN            uint32                       `json:"peer-asn,omitempty"`
+	PeerID             netip.Addr                   `json:"peer-id,omitzero"`
+	PeerAddress        netip.Addr                   `json:"peer-address,omitzero"`
+	IsFromExternal     bool                         `json:"is-from-external,omitempty"`
+	NoImplicitWithdraw bool                         `json:"no-implicit-withdraw,omitempty"`
+	IsNexthopInvalid   bool                         `json:"is-nexthop-invalid,omitempty"`
+	// the following fields are used only reported by GetList() API
+	SendMaxFiltered bool            `json:"send-max-filtered,omitempty"` // true if the path has been filtered out due to max path count reached
+	Filtered        bool            `json:"filtered,omitempty"`
+	Validation      *api.Validation `json:"validation,omitempty"`
+	RemoteID        uint32
+	LocalID         uint32
+	// netlink integration fields
+	IsNetlink     bool   `json:"is-netlink,omitempty"`
+	NetlinkIfName string `json:"netlink-ifname,omitempty"`
 }
 
 type PeerConf struct {
@@ -115,13 +119,15 @@ type PeerConf struct {
 	NeighborInterface string
 }
 type PeerState struct {
-	PeerASN         uint32
-	LocalASN        uint32
-	NeighborAddress netip.Addr
-	SessionState    bgp.FSMState
-	AdminState      api.PeerState_AdminState
-	RouterID        netip.Addr
-	RemoteCap       []bgp.ParameterCapabilityInterface
+	PeerASN           uint32
+	LocalASN          uint32
+	NeighborAddress   netip.Addr
+	SessionState      bgp.FSMState
+	AdminState        api.PeerState_AdminState
+	RouterID          netip.Addr
+	RemoteCap         []bgp.ParameterCapabilityInterface
+	DisconnectReason  api.PeerState_DisconnectReason
+	DisconnectMessage string
 }
 type Transport struct {
 	LocalAddress netip.Addr
@@ -165,7 +171,7 @@ func NewDestination(dst *api.Destination) *Destination {
 	return &Destination{Paths: l}
 }
 
-func NewPath(family bgp.Family, nlri bgp.AddrPrefixInterface, isWithdraw bool, attrs []bgp.PathAttributeInterface, age time.Time) (*api.Path, error) {
+func NewPath(family bgp.Family, nlri bgp.NLRI, isWithdraw bool, attrs []bgp.PathAttributeInterface, age time.Time) (*api.Path, error) {
 	n, err := MarshalNLRI(nlri)
 	if err != nil {
 		return nil, err
@@ -180,11 +186,10 @@ func NewPath(family bgp.Family, nlri bgp.AddrPrefixInterface, isWithdraw bool, a
 		Age:        tspb.New(age),
 		IsWithdraw: isWithdraw,
 		Family:     ToApiFamily(family.Afi(), family.Safi()),
-		Identifier: nlri.PathIdentifier(),
 	}, nil
 }
 
-func GetNativeNlri(p *api.Path) (bgp.AddrPrefixInterface, error) {
+func GetNativeNlri(p *api.Path) (bgp.NLRI, error) {
 	if p.Family == nil {
 		return nil, fmt.Errorf("family cannot be nil")
 	}

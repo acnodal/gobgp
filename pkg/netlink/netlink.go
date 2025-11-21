@@ -16,7 +16,8 @@
 package netlink
 
 import (
-	"github.com/osrg/gobgp/v4/pkg/log"
+	"log/slog"
+
 	"github.com/vishvananda/netlink"
 )
 
@@ -41,11 +42,11 @@ func (m *DefaultNetlinkManager) LinkByName(name string) (netlink.Link, error) {
 }
 
 type NetlinkClient struct {
-	logger  log.Logger
+	logger  *slog.Logger
 	manager NetlinkManager
 }
 
-func NewNetlinkClient(logger log.Logger) (*NetlinkClient, error) {
+func NewNetlinkClient(logger *slog.Logger) (*NetlinkClient, error) {
 	return &NetlinkClient{
 		logger:  logger,
 		manager: &DefaultNetlinkManager{},

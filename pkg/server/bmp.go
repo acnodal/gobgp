@@ -18,6 +18,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
 	"strconv"
@@ -28,7 +29,6 @@ import (
 	"github.com/osrg/gobgp/v4/internal/pkg/table"
 	"github.com/osrg/gobgp/v4/pkg/apiutil"
 	"github.com/osrg/gobgp/v4/pkg/config/oc"
-	"github.com/osrg/gobgp/v4/pkg/log"
 	"github.com/osrg/gobgp/v4/pkg/packet/bgp"
 	"github.com/osrg/gobgp/v4/pkg/packet/bmp"
 )
@@ -88,10 +88,8 @@ func (b *bmpClient) tryConnect() *net.TCPConn {
 	interval := 1
 	for {
 		b.s.logger.Debug("Connecting to BMP server",
-			log.Fields{
-				"Topic": "bmp",
-				"Key":   b.host,
-			})
+			slog.String("Topic", "bmp"),
+			slog.String("Key", b.host))
 		conn, err := net.Dial("tcp", b.host)
 		if err != nil {
 			select {
@@ -105,10 +103,8 @@ func (b *bmpClient) tryConnect() *net.TCPConn {
 			}
 		} else {
 			b.s.logger.Debug("Connected to BMP server",
-				log.Fields{
-					"Topic": "bmp",
-					"Key":   b.host,
-				})
+				slog.String("Topic", "bmp"),
+				slog.String("Key", b.host))
 			return conn.(*net.TCPConn)
 		}
 	}
@@ -132,7 +128,7 @@ func (b *bmpClient) loop() {
 			}()
 			ops := []WatchOption{WatchPeer()}
 			if b.c.RouteMonitoringPolicy == oc.BMP_ROUTE_MONITORING_POLICY_TYPE_BOTH {
-				b.s.logger.Warn("both option for route-monitoring-policy is obsoleted", log.Fields{"Topic": "bmp"})
+				b.s.logger.Warn("both option for route-monitoring-policy is obsoleted", slog.String("Topic", "bmp"))
 			}
 			if b.c.RouteMonitoringPolicy == oc.BMP_ROUTE_MONITORING_POLICY_TYPE_PRE_POLICY || b.c.RouteMonitoringPolicy == oc.BMP_ROUTE_MONITORING_POLICY_TYPE_ALL {
 				ops = append(ops, WatchUpdate(true, "", ""))
@@ -151,7 +147,7 @@ func (b *bmpClient) loop() {
 
 			var tickerCh <-chan time.Time
 			if b.c.StatisticsTimeout == 0 {
-				b.s.logger.Debug("statistics reports disabled", log.Fields{"Topic": "bmp"})
+				b.s.logger.Debug("statistics reports disabled", slog.String("Topic", "bmp"))
 			} else {
 				t := time.NewTicker(time.Duration(b.c.StatisticsTimeout) * time.Second)
 				defer t.Stop()
@@ -163,10 +159,9 @@ func (b *bmpClient) loop() {
 				_, err := conn.Write(buf)
 				if err != nil {
 					b.s.logger.Warn("failed to write to bmp server",
-						log.Fields{
-							"Topic": "bmp",
-							"Key":   b.host,
-						})
+						slog.String("Topic", "bmp"),
+						slog.String("Key", b.host),
+						slog.String("Message", err.Error()))
 				}
 				return err
 			}
@@ -185,12 +180,10 @@ func (b *bmpClient) loop() {
 				case ev := <-w.Event():
 					switch msg := ev.(type) {
 					case *watchEventUpdate:
-						addr, _ := netip.AddrFromSlice(msg.PeerAddress)
-						id, _ := netip.AddrFromSlice(msg.PeerID)
 						info := &table.PeerInfo{
-							Address: addr,
+							Address: msg.PeerAddress,
 							AS:      msg.PeerAS,
-							ID:      id,
+							ID:      msg.PeerID,
 						}
 						if msg.Payload == nil {
 							var pathList []*table.Path
@@ -218,7 +211,7 @@ func (b *bmpClient) loop() {
 						info := &table.PeerInfo{
 							Address: netip.MustParseAddr("0.0.0.0"),
 							AS:      b.s.bgpConfig.Global.Config.As,
-							ID:      netip.MustParseAddr(b.s.bgpConfig.Global.Config.RouterId),
+							ID:      b.s.bgpConfig.Global.Config.RouterId,
 						}
 						for _, p := range msg.PathList {
 							u := table.CreateUpdateMsgFromPaths([]*table.Path{p})[0]
@@ -241,12 +234,10 @@ func (b *bmpClient) loop() {
 							}
 						}
 					case *watchEventMessage:
-						addr, _ := netip.AddrFromSlice(msg.PeerAddress)
-						id, _ := netip.AddrFromSlice(msg.PeerID)
 						info := &table.PeerInfo{
-							Address: addr,
+							Address: msg.PeerAddress,
 							AS:      msg.PeerAS,
-							ID:      id,
+							ID:      msg.PeerID,
 						}
 						if err := write(bmpPeerRouteMirroring(bmp.BMP_PEER_TYPE_GLOBAL, 0, info, msg.Timestamp.Unix(), msg.Message)); err != nil {
 							return false
@@ -371,7 +362,7 @@ func bmpPeerRouteMirroring(peerType uint8, peerDist uint64, peerInfo *table.Peer
 }
 
 func (b *bmpClientManager) addServer(c *oc.BmpServerConfig) error {
-	host := net.JoinHostPort(c.Address, strconv.Itoa(int(c.Port)))
+	host := net.JoinHostPort(c.Address.String(), strconv.Itoa(int(c.Port)))
 	if _, y := b.clientMap[host]; y {
 		return fmt.Errorf("bmp client %s is already configured", host)
 	}
@@ -387,7 +378,7 @@ func (b *bmpClientManager) addServer(c *oc.BmpServerConfig) error {
 }
 
 func (b *bmpClientManager) deleteServer(c *oc.BmpServerConfig) error {
-	host := net.JoinHostPort(c.Address, strconv.Itoa(int(c.Port)))
+	host := net.JoinHostPort(c.Address.String(), strconv.Itoa(int(c.Port)))
 	if c, y := b.clientMap[host]; !y {
 		return fmt.Errorf("bmp client %s isn't found", host)
 	} else {

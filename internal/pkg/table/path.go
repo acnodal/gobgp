@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"net"
 	"net/netip"
@@ -28,7 +29,6 @@ import (
 	"time"
 
 	"github.com/osrg/gobgp/v4/pkg/config/oc"
-	"github.com/osrg/gobgp/v4/pkg/log"
 	"github.com/osrg/gobgp/v4/pkg/packet/bgp"
 	"github.com/segmentio/fasthash/fnv1a"
 )
@@ -86,7 +86,7 @@ func NewBitmap(size int) *Bitmap {
 }
 
 type originInfo struct {
-	nlri               bgp.AddrPrefixInterface
+	nlri               bgp.NLRI
 	source             *PeerInfo
 	timestamp          int64
 	noImplicitWithdraw bool
@@ -137,6 +137,8 @@ type Path struct {
 	pathAttrs []bgp.PathAttributeInterface
 	dels      []bgp.BGPAttrType
 	attrsHash uint64
+	localID   uint32
+	remoteID  uint32
 	family    bgp.Family
 	rejected  bool
 	// doesn't exist in the adj
@@ -173,7 +175,7 @@ func NewPathDestLocalKey(f bgp.Family, destPrefix string) *PathDestLocalKey {
 
 var localSource = &PeerInfo{}
 
-func NewPath(family bgp.Family, source *PeerInfo, nlri bgp.AddrPrefixInterface, isWithdraw bool, pattrs []bgp.PathAttributeInterface, timestamp time.Time, noImplicitWithdraw bool) *Path {
+func NewPath(family bgp.Family, source *PeerInfo, pathnlri bgp.PathNLRI, isWithdraw bool, pattrs []bgp.PathAttributeInterface, timestamp time.Time, noImplicitWithdraw bool) *Path {
 	if source == nil {
 		source = localSource
 	}
@@ -182,7 +184,7 @@ func NewPath(family bgp.Family, source *PeerInfo, nlri bgp.AddrPrefixInterface, 
 	}
 	return &Path{
 		info: &originInfo{
-			nlri:               nlri,
+			nlri:               pathnlri.NLRI,
 			source:             source,
 			timestamp:          timestamp.Unix(),
 			noImplicitWithdraw: noImplicitWithdraw,
@@ -190,6 +192,7 @@ func NewPath(family bgp.Family, source *PeerInfo, nlri bgp.AddrPrefixInterface, 
 		family:     family,
 		IsWithdraw: isWithdraw,
 		pathAttrs:  pattrs,
+		remoteID:   pathnlri.ID,
 	}
 }
 
@@ -220,7 +223,7 @@ func cloneAsPath(asAttr *bgp.PathAttributeAsPath) *bgp.PathAttributeAsPath {
 	return bgp.NewPathAttributeAsPath(newASparams)
 }
 
-func UpdatePathAttrs(logger log.Logger, global *oc.Global, peer *oc.Neighbor, info *PeerInfo, original *Path) *Path {
+func UpdatePathAttrs(logger *slog.Logger, global *oc.Global, peer *oc.Neighbor, info *PeerInfo, original *Path) *Path {
 	if peer.RouteServer.Config.RouteServerClient {
 		return original
 	}
@@ -242,8 +245,15 @@ func UpdatePathAttrs(logger log.Logger, global *oc.Global, peer *oc.Neighbor, in
 		}
 	}
 
+	localAddress := info.LocalAddress
+	nexthop := path.GetNexthop()
 	switch peer.State.PeerType {
 	case oc.PEER_TYPE_EXTERNAL:
+		// NEXTHOP handling
+		if !path.IsLocal() || nexthop.IsUnspecified() {
+			path.SetNexthop(localAddress.AsSlice())
+		}
+
 		// remove-private-as handling
 		path.RemovePrivateAS(peer.Config.LocalAs, peer.State.RemovePrivateAs)
 
@@ -258,87 +268,15 @@ func UpdatePathAttrs(logger log.Logger, global *oc.Global, peer *oc.Neighbor, in
 		if med := path.getPathAttr(bgp.BGP_ATTR_TYPE_MULTI_EXIT_DISC); med != nil && !path.IsLocal() {
 			path.delPathAttr(bgp.BGP_ATTR_TYPE_MULTI_EXIT_DISC)
 		}
-
-		// Nexthop handling for eBGP - always set nexthop-self
-		family := path.GetFamily()
-
-		// For netlink routes, use interface addresses (includes link-local for IPv6)
-		if path.GetSource().IsNetlink {
-			if family.Afi() == bgp.AFI_IP6 {
-				if info.IPv6Nexthop != nil && !info.IPv6Nexthop.IsUnspecified() {
-					nexthops := []net.IP{info.IPv6Nexthop}
-					if info.IPv6LinkLocalNexthop != nil && !info.IPv6LinkLocalNexthop.IsUnspecified() {
-						nexthops = append(nexthops, info.IPv6LinkLocalNexthop)
-					}
-					path.SetNexthops(nexthops)
-				} else {
-					logger.Warn("could not determine a valid IPv6 nexthop for netlink-originated route",
-						log.Fields{
-							"Topic":  "Peer",
-							"Key":    peer.State.NeighborAddress,
-							"Prefix": path.GetPrefix(),
-						})
-				}
-			} else {
-				if info.IPv4Nexthop != nil && !info.IPv4Nexthop.IsUnspecified() {
-					path.SetNexthop(info.IPv4Nexthop)
-				} else {
-					logger.Warn("could not determine a valid IPv4 nexthop for netlink-originated route",
-						log.Fields{
-							"Topic":  "Peer",
-							"Key":    peer.State.NeighborAddress,
-							"Prefix": path.GetPrefix(),
-						})
-				}
-			}
-		} else {
-			// For non-netlink routes, set nexthop-self (standard eBGP behavior)
-			if family.Afi() == bgp.AFI_IP6 {
-				if info.IPv6Nexthop != nil && !info.IPv6Nexthop.IsUnspecified() {
-					// For IPv6, only use global address (not link-local) for non-netlink routes
-					path.SetNexthop(info.IPv6Nexthop)
-				}
-			} else {
-				if info.IPv4Nexthop != nil && !info.IPv4Nexthop.IsUnspecified() {
-					path.SetNexthop(info.IPv4Nexthop)
-				}
-			}
-		}
-
 	case oc.PEER_TYPE_INTERNAL:
-		// Only set nexthop for netlink-originated routes
-		// For other routes, let normal iBGP nexthop processing and policy apply
-		if path.GetSource().IsNetlink {
-			family := path.GetFamily()
-			if family.Afi() == bgp.AFI_IP6 {
-				if info.IPv6Nexthop != nil && !info.IPv6Nexthop.IsUnspecified() {
-					nexthops := []net.IP{info.IPv6Nexthop}
-					if info.IPv6LinkLocalNexthop != nil && !info.IPv6LinkLocalNexthop.IsUnspecified() {
-						nexthops = append(nexthops, info.IPv6LinkLocalNexthop)
-					}
-					path.SetNexthops(nexthops)
-				} else {
-					logger.Warn("could not determine a valid IPv6 nexthop for netlink-originated route",
-						log.Fields{
-							"Topic":  "Peer",
-							"Key":    peer.State.NeighborAddress,
-							"Prefix": path.GetPrefix(),
-						})
-				}
-			} else {
-				if info.IPv4Nexthop != nil && !info.IPv4Nexthop.IsUnspecified() {
-					path.SetNexthop(info.IPv4Nexthop)
-				} else {
-					logger.Warn("could not determine a valid IPv4 nexthop for netlink-originated route",
-						log.Fields{
-							"Topic":  "Peer",
-							"Key":    peer.State.NeighborAddress,
-							"Prefix": path.GetPrefix(),
-						})
-				}
-			}
+		// NEXTHOP handling for iBGP
+		// if the path generated locally set local address as nexthop.
+		// if not, don't modify it.
+		// TODO: NEXT-HOP-SELF support
+		if path.IsLocal() && nexthop.IsUnspecified() {
+			path.SetNexthop(localAddress.AsSlice())
 		}
-		// For non-netlink iBGP routes, nexthop is preserved (standard iBGP behavior)
+
 		// AS_PATH handling for iBGP
 		// if the path has AS_PATH path attribute, don't modify it.
 		// if not, attach *empty* AS_PATH path attribute.
@@ -355,6 +293,7 @@ func UpdatePathAttrs(logger log.Logger, global *oc.Global, peer *oc.Neighbor, in
 
 		// RFC4456: BGP Route Reflection
 		// 8. Avoiding Routing Information Loops
+		info := path.GetSource()
 		if peer.RouteReflector.Config.RouteReflectorClient {
 			// This attribute will carry the BGP Identifier of the originator of the route in the local AS.
 			// A BGP speaker SHOULD NOT create an ORIGINATOR_ID attribute if one already exists.
@@ -365,44 +304,37 @@ func UpdatePathAttrs(logger log.Logger, global *oc.Global, peer *oc.Neighbor, in
 			// advertiser, and the Next-hop attribute shall be set of the local
 			// address for that session.
 			if path.GetFamily() == bgp.RF_RTC_UC {
-				path.SetNexthop(info.LocalAddress.AsSlice())
-				path.setPathAttr(bgp.NewPathAttributeOriginatorId(info.LocalID.String()))
+				path.SetNexthop(localAddress.AsSlice())
+				attr, _ := bgp.NewPathAttributeOriginatorId(info.LocalID)
+				path.setPathAttr(attr)
 			} else if path.getPathAttr(bgp.BGP_ATTR_TYPE_ORIGINATOR_ID) == nil {
 				if path.IsLocal() {
-					path.setPathAttr(bgp.NewPathAttributeOriginatorId(global.Config.RouterId))
+					attr, _ := bgp.NewPathAttributeOriginatorId(global.Config.RouterId)
+					path.setPathAttr(attr)
 				} else {
-					path.setPathAttr(bgp.NewPathAttributeOriginatorId(info.ID.String()))
+					attr, _ := bgp.NewPathAttributeOriginatorId(info.ID)
+					path.setPathAttr(attr)
 				}
 			}
 			// When an RR reflects a route, it MUST prepend the local CLUSTER_ID to the CLUSTER_LIST.
 			// If the CLUSTER_LIST is empty, it MUST create a new one.
-			clusterID := string(peer.RouteReflector.State.RouteReflectorClusterId)
+			// TODO: needs to validated earlier.
+			clusterID := peer.RouteReflector.State.RouteReflectorClusterId
 			if p := path.getPathAttr(bgp.BGP_ATTR_TYPE_CLUSTER_LIST); p == nil {
-				path.setPathAttr(bgp.NewPathAttributeClusterList([]string{clusterID}))
+				pa, _ := bgp.NewPathAttributeClusterList([]netip.Addr{clusterID})
+				path.setPathAttr(pa)
 			} else {
 				clusterList := p.(*bgp.PathAttributeClusterList)
-				newClusterList := make([]string, 0, len(clusterList.Value))
-				for _, ip := range clusterList.Value {
-					newClusterList = append(newClusterList, ip.String())
-				}
-				path.setPathAttr(bgp.NewPathAttributeClusterList(append([]string{clusterID}, newClusterList...)))
+				pa, _ := bgp.NewPathAttributeClusterList(append([]netip.Addr{clusterID}, clusterList.Value...))
+				path.setPathAttr(pa)
 			}
 		}
 	default:
 		logger.Warn("invalid peer type",
-			log.Fields{
-				"Topic": "Peer",
-				"Key":   peer.State.NeighborAddress,
-				"Type":  peer.State.PeerType,
-			})
+			slog.String("Topic", "Peer"),
+			slog.String("Key", peer.State.NeighborAddress.String()),
+			slog.Any("Type", peer.State.PeerType))
 	}
-	logger.Debug("UpdatePathAttrs",
-		log.Fields{
-			"Topic":   "Peer",
-			"Key":     peer.State.NeighborAddress,
-			"Path":    path,
-			"Nexthop": path.GetNexthop(),
-		})
 	return path
 }
 
@@ -431,6 +363,8 @@ func (path *Path) Clone(isWithdraw bool) *Path {
 		IsWithdraw:       isWithdraw,
 		IsNexthopInvalid: path.IsNexthopInvalid,
 		attrsHash:        path.attrsHash,
+		localID:          path.localID,
+		remoteID:         path.remoteID,
 	}
 }
 
@@ -527,40 +461,26 @@ func (path *Path) GetNexthop() netip.Addr {
 }
 
 func (path *Path) SetNexthop(nexthop net.IP) {
-	path.SetNexthops([]net.IP{nexthop})
-}
-
-func (path *Path) SetNexthops(nexthops []net.IP) {
-	if len(nexthops) == 0 {
-		return
-	}
-
-	nexthop := nexthops[0]
-	var linkLocalNexthop net.IP
-	if len(nexthops) > 1 {
-		linkLocalNexthop = nexthops[1]
-	}
-
 	if path.GetFamily() == bgp.RF_IPv4_UC && nexthop.To4() == nil {
 		path.delPathAttr(bgp.BGP_ATTR_TYPE_NEXT_HOP)
-		mpreach, _ := bgp.NewPathAttributeMpReachNLRIwithNexthops(path.GetFamily(), []bgp.AddrPrefixInterface{path.GetNlri()}, nexthop, linkLocalNexthop)
+		mpreach, _ := bgp.NewPathAttributeMpReachNLRI(path.GetFamily(), []bgp.PathNLRI{{NLRI: path.GetNlri(), ID: path.localID}}, netip.MustParseAddr(nexthop.String()))
 		path.setPathAttr(mpreach)
 		return
 	}
 	attr := path.getPathAttr(bgp.BGP_ATTR_TYPE_NEXT_HOP)
 	if attr != nil {
-		path.setPathAttr(bgp.NewPathAttributeNextHop(nexthop.String()))
+		pa, _ := bgp.NewPathAttributeNextHop(netip.MustParseAddr(nexthop.String()))
+		path.setPathAttr(pa)
 	}
 	attr = path.getPathAttr(bgp.BGP_ATTR_TYPE_MP_REACH_NLRI)
 	if attr != nil {
 		oldNlri := attr.(*bgp.PathAttributeMpReachNLRI)
-		mpreach, _ := bgp.NewPathAttributeMpReachNLRIwithNexthops(path.GetFamily(), oldNlri.Value, nexthop, linkLocalNexthop)
+		mpreach, _ := bgp.NewPathAttributeMpReachNLRI(path.GetFamily(), oldNlri.Value, netip.MustParseAddr(nexthop.String()))
 		path.setPathAttr(mpreach)
 	}
 }
 
-
-func (path *Path) GetNlri() bgp.AddrPrefixInterface {
+func (path *Path) GetNlri() bgp.NLRI {
 	return path.OriginInfo().nlri
 }
 
@@ -687,7 +607,7 @@ func (path *Path) String() string {
 func (path *Path) GetLocalKey() PathLocalKey {
 	return PathLocalKey{
 		PathDestLocalKey: path.GetDestLocalKey(),
-		Id:               path.GetNlri().PathLocalIdentifier(),
+		Id:               path.localID,
 	}
 }
 
@@ -1115,7 +1035,7 @@ func (lhs *Path) EqualBySourceAndPathID(rhs *Path) bool {
 		return false
 	}
 
-	return lhs.GetNlri().PathIdentifier() == rhs.GetNlri().PathIdentifier()
+	return lhs.remoteID == rhs.remoteID
 }
 
 func (lhs *Path) Equal(rhs *Path) bool {
@@ -1165,7 +1085,7 @@ func (lhs *Path) Equal(rhs *Path) bool {
 
 func (path *Path) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Nlri       bgp.AddrPrefixInterface      `json:"nlri"`
+		Nlri       bgp.NLRI                     `json:"nlri"`
 		PathAttrs  []bgp.PathAttributeInterface `json:"attrs"`
 		Age        int64                        `json:"age"`
 		Withdrawal bool                         `json:"withdrawal,omitempty"`
@@ -1183,12 +1103,7 @@ func (path *Path) MarshalJSON() ([]byte, error) {
 		SourceID:   path.GetSource().ID.AsSlice(),
 		NeighborIP: path.GetSource().Address.AsSlice(),
 		Stale:      path.IsStale(),
-		ID: func() uint32 {
-			if path.GetNlri() == nil {
-				return 0
-			}
-			return path.GetNlri().PathIdentifier()
-		}(),
+		ID:         path.remoteID,
 	})
 }
 
@@ -1236,30 +1151,22 @@ func (v *Vrf) ToGlobalPath(path *Path) error {
 	nh := path.GetNexthop()
 
 	switch rf := path.GetFamily(); rf {
-	case bgp.RF_IPv4_UC:
+	case bgp.RF_IPv4_UC, bgp.RF_IPv6_UC:
 		n := nlri.(*bgp.IPAddrPrefix)
-		pathIdentifier := path.GetNlri().PathIdentifier()
-		path.OriginInfo().nlri = bgp.NewLabeledVPNIPAddrPrefix(uint8(n.Prefix.Bits()), n.Prefix.Addr().String(), *bgp.NewMPLSLabelStack(v.MplsLabel), v.Rd)
-		path.GetNlri().SetPathIdentifier(pathIdentifier)
-		path.family = bgp.RF_IPv4_VPN
-	case bgp.RF_FS_IPv4_UC:
-		n := nlri.(*bgp.FlowSpecIPv4Unicast)
-		pathIdentifier := path.GetNlri().PathIdentifier()
-		path.OriginInfo().nlri = bgp.NewFlowSpecIPv4VPN(v.Rd, n.Value)
-		path.GetNlri().SetPathIdentifier(pathIdentifier)
-		path.family = bgp.RF_FS_IPv4_VPN
-	case bgp.RF_IPv6_UC:
-		n := nlri.(*bgp.IPv6AddrPrefix)
-		pathIdentifier := path.GetNlri().PathIdentifier()
-		path.OriginInfo().nlri = bgp.NewLabeledVPNIPv6AddrPrefix(uint8(n.Prefix.Bits()), n.Prefix.Addr().String(), *bgp.NewMPLSLabelStack(v.MplsLabel), v.Rd)
-		path.GetNlri().SetPathIdentifier(pathIdentifier)
-		path.family = bgp.RF_IPv6_VPN
-	case bgp.RF_FS_IPv6_UC:
-		n := nlri.(*bgp.FlowSpecIPv6Unicast)
-		pathIdentifier := path.GetNlri().PathIdentifier()
-		path.OriginInfo().nlri = bgp.NewFlowSpecIPv6VPN(v.Rd, n.Value)
-		path.GetNlri().SetPathIdentifier(pathIdentifier)
-		path.family = bgp.RF_FS_IPv6_VPN
+		path.OriginInfo().nlri, _ = bgp.NewLabeledVPNIPAddrPrefix(n.Prefix, *bgp.NewMPLSLabelStack(v.MplsLabel), v.Rd)
+		if rf == bgp.RF_IPv4_UC {
+			path.family = bgp.RF_IPv4_VPN
+		} else {
+			path.family = bgp.RF_IPv6_VPN
+		}
+	case bgp.RF_FS_IPv4_UC, bgp.RF_FS_IPv6_UC:
+		n := nlri.(*bgp.FlowSpecNLRI)
+		if rf == bgp.RF_FS_IPv4_UC {
+			path.family = bgp.RF_FS_IPv4_VPN
+		} else {
+			path.family = bgp.RF_FS_IPv6_VPN
+		}
+		path.OriginInfo().nlri, _ = bgp.NewFlowSpecVPN(path.family, v.Rd, n.Value)
 	case bgp.RF_EVPN:
 		n := nlri.(*bgp.EVPNNLRI)
 		switch n.RouteType {
@@ -1286,7 +1193,7 @@ func (v *Vrf) ToGlobalPath(path *Path) error {
 	path.SetExtCommunities(v.ExportRt, false)
 	// FIXME: we should not need to keep mp reach in Path.
 	path.delPathAttr(bgp.BGP_ATTR_TYPE_NEXT_HOP)
-	mpreach, _ := bgp.NewPathAttributeMpReachNLRI(path.family, []bgp.AddrPrefixInterface{path.OriginInfo().nlri}, nh)
+	mpreach, _ := bgp.NewPathAttributeMpReachNLRI(path.family, []bgp.PathNLRI{{NLRI: path.OriginInfo().nlri, ID: path.localID}}, nh)
 	path.setPathAttr(mpreach)
 	return nil
 }
@@ -1295,18 +1202,15 @@ func (p *Path) ToGlobal(vrf *Vrf) *Path {
 	nlri := p.GetNlri()
 	nh := p.GetNexthop()
 	var newFamily bgp.Family
-	pathId := nlri.PathIdentifier()
 	switch rf := p.GetFamily(); rf {
-	case bgp.RF_IPv4_UC:
+	case bgp.RF_IPv4_UC, bgp.RF_IPv6_UC:
 		n := nlri.(*bgp.IPAddrPrefix)
-		nlri = bgp.NewLabeledVPNIPAddrPrefix(uint8(n.Prefix.Bits()), n.Prefix.Addr().String(), *bgp.NewMPLSLabelStack(vrf.MplsLabel), vrf.Rd)
-		nlri.SetPathIdentifier(pathId)
-		newFamily = bgp.RF_IPv4_VPN
-	case bgp.RF_IPv6_UC:
-		n := nlri.(*bgp.IPv6AddrPrefix)
-		nlri = bgp.NewLabeledVPNIPv6AddrPrefix(uint8(n.Prefix.Bits()), n.Prefix.Addr().String(), *bgp.NewMPLSLabelStack(vrf.MplsLabel), vrf.Rd)
-		nlri.SetPathIdentifier(pathId)
-		newFamily = bgp.RF_IPv6_VPN
+		nlri, _ = bgp.NewLabeledVPNIPAddrPrefix(n.Prefix, *bgp.NewMPLSLabelStack(vrf.MplsLabel), vrf.Rd)
+		if rf == bgp.RF_IPv4_UC {
+			newFamily = bgp.RF_IPv4_VPN
+		} else {
+			newFamily = bgp.RF_IPv6_VPN
+		}
 	case bgp.RF_EVPN:
 		n := nlri.(*bgp.EVPNNLRI)
 		switch n.RouteType {
@@ -1354,11 +1258,13 @@ func (p *Path) ToGlobal(vrf *Vrf) *Path {
 	default:
 		return p
 	}
-	path := NewPath(newFamily, p.OriginInfo().source, nlri, p.IsWithdraw, p.GetPathAttrs(), p.GetTimestamp(), false)
+	path := NewPath(newFamily, p.OriginInfo().source, bgp.PathNLRI{NLRI: nlri}, p.IsWithdraw, p.GetPathAttrs(), p.GetTimestamp(), false)
 	path.SetExtCommunities(vrf.ExportRt, false)
 	path.delPathAttr(bgp.BGP_ATTR_TYPE_NEXT_HOP)
-	attr, _ := bgp.NewPathAttributeMpReachNLRI(newFamily, []bgp.AddrPrefixInterface{nlri}, nh)
+	attr, _ := bgp.NewPathAttributeMpReachNLRI(newFamily, []bgp.PathNLRI{{NLRI: nlri, ID: p.localID}}, nh)
 	path.setPathAttr(attr)
+	path.localID = p.localID
+	path.remoteID = p.remoteID
 	return path
 }
 
@@ -1366,39 +1272,26 @@ func (p *Path) ToLocal() *Path {
 	var newFamily bgp.Family
 	nlri := p.GetNlri()
 	f := p.GetFamily()
-	localPathId := nlri.PathLocalIdentifier()
-	pathId := nlri.PathIdentifier()
 	switch f {
-	case bgp.RF_IPv4_VPN:
+	case bgp.RF_IPv4_VPN, bgp.RF_IPv6_VPN:
 		n := nlri.(*bgp.LabeledVPNIPAddrPrefix)
 		nlri, _ = bgp.NewIPAddrPrefix(n.Prefix)
-		nlri.SetPathLocalIdentifier(localPathId)
-		nlri.SetPathIdentifier(pathId)
-		newFamily = bgp.RF_IPv4_UC
-	case bgp.RF_FS_IPv4_VPN:
-		n := nlri.(*bgp.FlowSpecIPv4VPN)
-		nlri = bgp.NewFlowSpecIPv4Unicast(n.Value)
-		nlri.SetPathLocalIdentifier(localPathId)
-		nlri.SetPathIdentifier(pathId)
+		if f == bgp.RF_IPv4_VPN {
+			newFamily = bgp.RF_IPv4_UC
+		} else {
+			newFamily = bgp.RF_IPv6_UC
+		}
+	case bgp.RF_FS_IPv4_VPN, bgp.RF_FS_IPv6_VPN:
+		n := nlri.(*bgp.FlowSpecNLRI)
 		newFamily = bgp.RF_FS_IPv4_UC
-	case bgp.RF_IPv6_VPN:
-		n := nlri.(*bgp.LabeledVPNIPv6AddrPrefix)
-		_, c, _ := net.ParseCIDR(n.IPPrefix())
-		ones, _ := c.Mask.Size()
-		nlri = bgp.NewIPv6AddrPrefix(uint8(ones), c.IP.String())
-		nlri.SetPathLocalIdentifier(localPathId)
-		nlri.SetPathIdentifier(pathId)
-		newFamily = bgp.RF_IPv6_UC
-	case bgp.RF_FS_IPv6_VPN:
-		n := nlri.(*bgp.FlowSpecIPv6VPN)
-		nlri = bgp.NewFlowSpecIPv6Unicast(n.Value)
-		nlri.SetPathLocalIdentifier(localPathId)
-		nlri.SetPathIdentifier(pathId)
-		newFamily = bgp.RF_FS_IPv6_UC
+		if f == bgp.RF_FS_IPv6_VPN {
+			newFamily = bgp.RF_FS_IPv6_UC
+		}
+		nlri, _ = bgp.NewFlowSpecUnicast(newFamily, n.Value)
 	default:
 		return p
 	}
-	path := NewPath(newFamily, p.OriginInfo().source, nlri, p.IsWithdraw, p.GetPathAttrs(), p.GetTimestamp(), false)
+	path := NewPath(newFamily, p.OriginInfo().source, bgp.PathNLRI{NLRI: nlri}, p.IsWithdraw, p.GetPathAttrs(), p.GetTimestamp(), false)
 	switch f {
 	case bgp.RF_IPv4_VPN, bgp.RF_IPv6_VPN:
 		path.delPathAttr(bgp.BGP_ATTR_TYPE_EXTENDED_COMMUNITIES)
@@ -1418,9 +1311,12 @@ func (p *Path) ToLocal() *Path {
 	if f == bgp.RF_IPv4_VPN {
 		nh := path.GetNexthop()
 		path.delPathAttr(bgp.BGP_ATTR_TYPE_MP_REACH_NLRI)
-		path.setPathAttr(bgp.NewPathAttributeNextHop(nh.String()))
+		pa, _ := bgp.NewPathAttributeNextHop(nh)
+		path.setPathAttr(pa)
 	}
 	path.IsNexthopInvalid = p.IsNexthopInvalid
+	path.localID = p.localID
+	path.remoteID = p.remoteID
 	return path
 }
 
@@ -1450,37 +1346,30 @@ func (p *Path) SetSource(peerInfo *PeerInfo) {
 	}
 }
 
-func nlriToIPNet(nlri bgp.AddrPrefixInterface) *net.IPNet {
+func (p *Path) LocalID() uint32 {
+	return p.localID
+}
+
+func (p *Path) RemoteID() uint32 {
+	return p.remoteID
+}
+
+func nlriToIPNet(nlri bgp.NLRI) *net.IPNet {
 	switch T := nlri.(type) {
 	case *bgp.IPAddrPrefix:
 		return &net.IPNet{
 			IP:   T.Prefix.Addr().AsSlice(),
-			Mask: net.CIDRMask(T.Prefix.Bits(), 32),
-		}
-	case *bgp.IPv6AddrPrefix:
-		return &net.IPNet{
-			IP:   T.Prefix.Addr().AsSlice(),
-			Mask: net.CIDRMask(T.Prefix.Bits(), 128),
+			Mask: net.CIDRMask(T.Prefix.Bits(), T.Prefix.Addr().BitLen()),
 		}
 	case *bgp.LabeledIPAddrPrefix:
 		return &net.IPNet{
 			IP:   T.Prefix.Masked().Addr().AsSlice(),
-			Mask: net.CIDRMask(T.Prefix.Bits(), 32),
-		}
-	case *bgp.LabeledIPv6AddrPrefix:
-		return &net.IPNet{
-			IP:   T.Prefix.Masked().Addr().AsSlice(),
-			Mask: net.CIDRMask(T.Prefix.Bits(), 128),
+			Mask: net.CIDRMask(T.Prefix.Bits(), T.Prefix.Addr().BitLen()),
 		}
 	case *bgp.LabeledVPNIPAddrPrefix:
 		return &net.IPNet{
 			IP:   T.Prefix.Addr().AsSlice(),
-			Mask: net.CIDRMask(T.Prefix.Bits(), 32),
-		}
-	case *bgp.LabeledVPNIPv6AddrPrefix:
-		return &net.IPNet{
-			IP:   T.Prefix.Addr().AsSlice(),
-			Mask: net.CIDRMask(T.Prefix.Bits(), 128),
+			Mask: net.CIDRMask(T.Prefix.Bits(), T.Prefix.Addr().BitLen()),
 		}
 	}
 	return nil
