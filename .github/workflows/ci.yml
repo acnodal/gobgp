@@ -528,3 +528,18 @@ jobs:
           sudo apt-get install python3-setuptools
           sudo pip3 install -r test/pip-requires.txt
           PYTHONPATH=test python3 test/scenario_test/mup_test.py --gobgp-image gobgp -x -s
+
+  netlink:
+    name: netlink
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
+        with:
+          go-version: "stable"
+      - name: Build GoBGP binaries
+        run: |
+          CGO_ENABLED=0 go build -o gobgpd ./cmd/gobgpd
+          CGO_ENABLED=0 go build -o gobgp ./cmd/gobgp
+      - name: Run netlink tests
+        run: sudo ./test-netlink.sh
