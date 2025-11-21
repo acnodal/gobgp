@@ -1,10 +1,8 @@
 # GoBGP-Netlink: BGP implementation in Go with Redistribution Support via Netlink
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/osrg/gobgp)](https://goreportcard.com/report/github.com/osrg/gobgp)
-[![Tests](https://github.com/osrg/gobgp/actions/workflows/ci.yml/badge.svg)](https://github.com/osrg/gobgp/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/osrg/gobgp/v4.svg)](https://pkg.go.dev/github.com/osrg/gobgp/v4)
-[![Releases](https://img.shields.io/github/release/osrg/gobgp/all.svg?style=flat-square)](https://github.com/osrg/gobgp/releases)
-[![LICENSE](https://img.shields.io/github/license/osrg/gobgp.svg?style=flat-square)](https://github.com/osrg/gobgp/blob/master/LICENSE)
+[![Tests](https://github.com/purelb/gobgp-netlink/actions/workflows/ci.yml/badge.svg)](https://github.com/purelb/gobgp-netlink/actions/workflows/ci.yml)
+[![Releases](https://img.shields.io/github/release/purelb/gobgp-netlink/all.svg?style=flat-square)](https://github.com/purelb/gobgp-netlink/releases)
+[![LICENSE](https://img.shields.io/github/license/purelb/gobgp-netlink.svg?style=flat-square)](https://github.com/purelb/gobgp-netlink/blob/master/LICENSE)
 
 GoBGP-Netlink is an open source Border Gateway Protocol (BGP) implementation designed from scratch for
 modern environment and implemented in a modern programming language,
@@ -18,7 +16,7 @@ This fork is maintained by the PureLB Kubernetes Load Balancer team.
 
 ## Install
 
-Try [a binary release](https://github.com/osrg/gobgp/releases/latest).
+Try [a binary release](https://github.com/purelb/gobgp-netlink/releases/latest).
 
 ## Documentation
 
@@ -79,5 +77,5 @@ code contributing.
 ## Licensing
 
 GoBGP is licensed under the Apache License, Version 2.0. See
-[LICENSE](https://github.com/osrg/gobgp/blob/master/LICENSE) for the full
+[LICENSE](https://github.com/purelb/gobgp-netlink/blob/master/LICENSE) for the full
 license text.
