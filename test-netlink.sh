@@ -124,6 +124,9 @@ cleanup() {
 setup_environment() {
     log_info "Setting up test environment..."
 
+    # Ensure test directory exists
+    mkdir -p "$TEST_DIR"
+
     # Create VRF
     ip link add "$VRF_NAME" type vrf table "$VRF_TABLE" 2>/dev/null || true
     ip link set "$VRF_NAME" up
