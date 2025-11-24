@@ -224,14 +224,6 @@ func cloneAsPath(asAttr *bgp.PathAttributeAsPath) *bgp.PathAttributeAsPath {
 }
 
 func UpdatePathAttrs(logger *slog.Logger, global *oc.Global, peer *oc.Neighbor, info *PeerInfo, original *Path) *Path {
-	logger.Debug("UpdatePathAttrs called",
-		slog.String("Topic", "Path"),
-		slog.String("Peer", peer.State.NeighborAddress.String()),
-		slog.String("Prefix", original.GetPrefix()),
-		slog.String("Family", original.GetFamily().String()),
-		slog.Bool("SourceIsNetlink", original.GetSource().IsNetlink),
-		slog.String("SourceID", original.GetSource().ID.String()))
-
 	if peer.RouteServer.Config.RouteServerClient {
 		return original
 	}
@@ -260,12 +252,6 @@ func UpdatePathAttrs(logger *slog.Logger, global *oc.Global, peer *oc.Neighbor, 
 	case oc.PEER_TYPE_EXTERNAL:
 		// Nexthop handling for netlink-originated routes
 		isNetlink := path.GetSource().IsNetlink
-		logger.Debug("Checking netlink status for path",
-			slog.String("Topic", "Peer"),
-			slog.String("Key", peer.State.NeighborAddress.String()),
-			slog.String("Prefix", path.GetPrefix()),
-			slog.Bool("IsNetlink", isNetlink),
-			slog.String("SourceID", path.GetSource().ID.String()))
 		if isNetlink {
 			family := path.GetFamily()
 			switch family {
@@ -295,36 +281,6 @@ func UpdatePathAttrs(logger *slog.Logger, global *oc.Global, peer *oc.Neighbor, 
 					path.SetNexthop(info.IPv4Nexthop)
 				} else {
 					logger.Warn("could not determine a valid IPv4 nexthop for netlink-originated route",
-						slog.String("Topic", "Peer"),
-						slog.String("Key", peer.State.NeighborAddress.String()),
-						slog.String("Prefix", path.GetPrefix()))
-				}
-			case bgp.RF_IPv6_VPN:
-				// IPv6 VPN routes (VRF): use global + link-local nexthops from peer's interface
-				if info.IPv6Nexthop != nil && !info.IPv6Nexthop.IsUnspecified() {
-					nexthops := []net.IP{info.IPv6Nexthop}
-					if info.IPv6LinkLocalNexthop != nil && !info.IPv6LinkLocalNexthop.IsUnspecified() {
-						nexthops = append(nexthops, info.IPv6LinkLocalNexthop)
-					}
-					logger.Debug("Setting IPv6 nexthops for netlink VRF route (eBGP)",
-						slog.String("Topic", "Peer"),
-						slog.String("Key", peer.State.NeighborAddress.String()),
-						slog.String("Prefix", path.GetPrefix()),
-						slog.Int("NexthopCount", len(nexthops)),
-						slog.Any("Nexthops", nexthops))
-					path.SetNexthops(nexthops)
-				} else {
-					logger.Warn("could not determine a valid IPv6 nexthop for netlink-originated VRF route",
-						slog.String("Topic", "Peer"),
-						slog.String("Key", peer.State.NeighborAddress.String()),
-						slog.String("Prefix", path.GetPrefix()))
-				}
-			case bgp.RF_IPv4_VPN:
-				// IPv4 VPN routes (VRF): use IPv4 nexthop from peer's interface
-				if info.IPv4Nexthop != nil && !info.IPv4Nexthop.IsUnspecified() {
-					path.SetNexthop(info.IPv4Nexthop)
-				} else {
-					logger.Warn("could not determine a valid IPv4 nexthop for netlink-originated VRF route",
 						slog.String("Topic", "Peer"),
 						slog.String("Key", peer.State.NeighborAddress.String()),
 						slog.String("Prefix", path.GetPrefix()))
@@ -377,36 +333,6 @@ func UpdatePathAttrs(logger *slog.Logger, global *oc.Global, peer *oc.Neighbor, 
 					path.SetNexthop(info.IPv4Nexthop)
 				} else {
 					logger.Warn("could not determine a valid IPv4 nexthop for netlink-originated route",
-						slog.String("Topic", "Peer"),
-						slog.String("Key", peer.State.NeighborAddress.String()),
-						slog.String("Prefix", path.GetPrefix()))
-				}
-			case bgp.RF_IPv6_VPN:
-				// IPv6 VPN routes (VRF): use global + link-local nexthops from peer's interface
-				if info.IPv6Nexthop != nil && !info.IPv6Nexthop.IsUnspecified() {
-					nexthops := []net.IP{info.IPv6Nexthop}
-					if info.IPv6LinkLocalNexthop != nil && !info.IPv6LinkLocalNexthop.IsUnspecified() {
-						nexthops = append(nexthops, info.IPv6LinkLocalNexthop)
-					}
-					logger.Debug("Setting IPv6 nexthops for netlink VRF route (iBGP)",
-						slog.String("Topic", "Peer"),
-						slog.String("Key", peer.State.NeighborAddress.String()),
-						slog.String("Prefix", path.GetPrefix()),
-						slog.Int("NexthopCount", len(nexthops)),
-						slog.Any("Nexthops", nexthops))
-					path.SetNexthops(nexthops)
-				} else {
-					logger.Warn("could not determine a valid IPv6 nexthop for netlink-originated VRF route",
-						slog.String("Topic", "Peer"),
-						slog.String("Key", peer.State.NeighborAddress.String()),
-						slog.String("Prefix", path.GetPrefix()))
-				}
-			case bgp.RF_IPv4_VPN:
-				// IPv4 VPN routes (VRF): use IPv4 nexthop from peer's interface
-				if info.IPv4Nexthop != nil && !info.IPv4Nexthop.IsUnspecified() {
-					path.SetNexthop(info.IPv4Nexthop)
-				} else {
-					logger.Warn("could not determine a valid IPv4 nexthop for netlink-originated VRF route",
 						slog.String("Topic", "Peer"),
 						slog.String("Key", peer.State.NeighborAddress.String()),
 						slog.String("Prefix", path.GetPrefix()))
