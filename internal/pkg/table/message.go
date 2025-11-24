@@ -314,8 +314,9 @@ func createMPReachMessage(path *Path) *bgp.BGPMessage {
 	attrs := make([]bgp.PathAttributeInterface, 0, len(oattrs))
 	for _, a := range oattrs {
 		if a.GetType() == bgp.BGP_ATTR_TYPE_MP_REACH_NLRI {
-			attr, _ := bgp.NewPathAttributeMpReachNLRI(path.GetFamily(), []bgp.PathNLRI{{NLRI: path.GetNlri(), ID: path.localID}}, path.GetNexthop())
-			attrs = append(attrs, attr)
+			// Use the existing MP_REACH_NLRI attribute which may contain both global and link-local nexthops
+			// Don't reconstruct it with only the global nexthop
+			attrs = append(attrs, a)
 		} else {
 			attrs = append(attrs, a)
 		}

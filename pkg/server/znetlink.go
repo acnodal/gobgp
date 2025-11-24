@@ -294,9 +294,11 @@ func (n *netlinkClient) ipNetsToPaths(routes []*custom_net.ConnectedRoute, iface
 		family := bgp.RF_IPv4_UC
 		if route.Prefix.IP.To4() == nil {
 			family = bgp.RF_IPv6_UC
+			// Set unspecified nexthop - will be updated to peer's local address by UpdatePathAttrs
 			mpreach, _ := bgp.NewPathAttributeMpReachNLRI(family, []bgp.PathNLRI{pathNlri}, netip.MustParseAddr("::"))
 			pattr = append(pattr, mpreach)
 		} else {
+			// Set unspecified nexthop - will be updated to peer's local address by UpdatePathAttrs
 			nexthop, _ := bgp.NewPathAttributeNextHop(netip.MustParseAddr("0.0.0.0"))
 			pattr = append(pattr, nexthop)
 		}

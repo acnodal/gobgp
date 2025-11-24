@@ -11885,6 +11885,7 @@ func (p *PathAttributeMpReachNLRI) Serialize(options ...*MarshallingOption) ([]b
 	nexthoplen := 0
 
 	isNexthopIPv6 := afi == AFI_IP6 || p.Nexthop.IsValid() && p.Nexthop.Is6()
+
 	if isNexthopIPv6 {
 		// if nexthop is v4, it needs to be serialized as IPv4-mapped IPv6 address.
 		n := p.Nexthop.As16()

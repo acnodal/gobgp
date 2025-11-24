@@ -1592,6 +1592,26 @@ func (s *BgpServer) handleFSMMessage(peer *peer, e *fsmMsg) {
 				}
 			}
 
+			// Log warning if cross-family nexthops couldn't be populated
+			if localAddr.Is4() && interfaceName != "" {
+				// IPv4 session - check if we got IPv6 nexthops
+				if peer.peerInfo.IPv6Nexthop == nil {
+					s.logger.Warn("Could not populate IPv6 nexthop for IPv4 peer - IPv6 routes may fail",
+						slog.String("Topic", "Peer"),
+						slog.String("Key", peer.ID()),
+						slog.String("Interface", interfaceName))
+				}
+			}
+			if localAddr.Is6() && !localAddr.Is4In6() && interfaceName != "" {
+				// IPv6 session - check if we got IPv4 nexthops
+				if peer.peerInfo.IPv4Nexthop == nil {
+					s.logger.Warn("Could not populate IPv4 nexthop for IPv6 peer - IPv4 routes may fail",
+						slog.String("Topic", "Peer"),
+						slog.String("Key", peer.ID()),
+						slog.String("Interface", interfaceName))
+				}
+			}
+
 			deferralExpiredFunc := func(family bgp.Family) func() {
 				//nolint: errcheck // ignore error
 				return func() {
