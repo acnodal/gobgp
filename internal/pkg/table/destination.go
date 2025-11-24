@@ -151,7 +151,7 @@ func NewPeerInfo(g *oc.Global, p *oc.Neighbor, AS, localAS uint32, ID, localID n
 func NewNetlinkPeerInfo(iface string, logger *slog.Logger) *PeerInfo {
 	peerInfo := &PeerInfo{
 		ID:            netip.MustParseAddr("0.0.0.1"), // Magic value
-		Address:       netip.Addr{},                    // Invalid address - makes IsLocal() return true
+		Address:       netip.Addr{},                   // Invalid address - makes IsLocal() return true
 		NetlinkIfName: iface,
 		IsNetlink:     true,
 	}

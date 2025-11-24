@@ -268,7 +268,8 @@ func UpdatePathAttrs(logger *slog.Logger, global *oc.Global, peer *oc.Neighbor, 
 			slog.String("SourceID", path.GetSource().ID.String()))
 		if isNetlink {
 			family := path.GetFamily()
-			if family == bgp.RF_IPv6_UC {
+			switch family {
+			case bgp.RF_IPv6_UC:
 				// IPv6 routes: use global + link-local nexthops from peer's interface
 				if info.IPv6Nexthop != nil && !info.IPv6Nexthop.IsUnspecified() {
 					nexthops := []net.IP{info.IPv6Nexthop}
@@ -288,7 +289,7 @@ func UpdatePathAttrs(logger *slog.Logger, global *oc.Global, peer *oc.Neighbor, 
 						slog.String("Key", peer.State.NeighborAddress.String()),
 						slog.String("Prefix", path.GetPrefix()))
 				}
-			} else if family == bgp.RF_IPv4_UC {
+			case bgp.RF_IPv4_UC:
 				// IPv4 routes: use IPv4 nexthop from peer's interface
 				if info.IPv4Nexthop != nil && !info.IPv4Nexthop.IsUnspecified() {
 					path.SetNexthop(info.IPv4Nexthop)
@@ -298,7 +299,7 @@ func UpdatePathAttrs(logger *slog.Logger, global *oc.Global, peer *oc.Neighbor, 
 						slog.String("Key", peer.State.NeighborAddress.String()),
 						slog.String("Prefix", path.GetPrefix()))
 				}
-			} else if family == bgp.RF_IPv6_VPN {
+			case bgp.RF_IPv6_VPN:
 				// IPv6 VPN routes (VRF): use global + link-local nexthops from peer's interface
 				if info.IPv6Nexthop != nil && !info.IPv6Nexthop.IsUnspecified() {
 					nexthops := []net.IP{info.IPv6Nexthop}
@@ -318,7 +319,7 @@ func UpdatePathAttrs(logger *slog.Logger, global *oc.Global, peer *oc.Neighbor, 
 						slog.String("Key", peer.State.NeighborAddress.String()),
 						slog.String("Prefix", path.GetPrefix()))
 				}
-			} else if family == bgp.RF_IPv4_VPN {
+			case bgp.RF_IPv4_VPN:
 				// IPv4 VPN routes (VRF): use IPv4 nexthop from peer's interface
 				if info.IPv4Nexthop != nil && !info.IPv4Nexthop.IsUnspecified() {
 					path.SetNexthop(info.IPv4Nexthop)
@@ -355,7 +356,8 @@ func UpdatePathAttrs(logger *slog.Logger, global *oc.Global, peer *oc.Neighbor, 
 		// For netlink routes, always set nexthop (treat as locally-originated)
 		if path.GetSource().IsNetlink {
 			family := path.GetFamily()
-			if family == bgp.RF_IPv6_UC {
+			switch family {
+			case bgp.RF_IPv6_UC:
 				// IPv6 routes: use global + link-local nexthops from peer's interface
 				if info.IPv6Nexthop != nil && !info.IPv6Nexthop.IsUnspecified() {
 					nexthops := []net.IP{info.IPv6Nexthop}
@@ -369,7 +371,7 @@ func UpdatePathAttrs(logger *slog.Logger, global *oc.Global, peer *oc.Neighbor, 
 						slog.String("Key", peer.State.NeighborAddress.String()),
 						slog.String("Prefix", path.GetPrefix()))
 				}
-			} else if family == bgp.RF_IPv4_UC {
+			case bgp.RF_IPv4_UC:
 				// IPv4 routes: use IPv4 nexthop from peer's interface
 				if info.IPv4Nexthop != nil && !info.IPv4Nexthop.IsUnspecified() {
 					path.SetNexthop(info.IPv4Nexthop)
@@ -379,7 +381,7 @@ func UpdatePathAttrs(logger *slog.Logger, global *oc.Global, peer *oc.Neighbor, 
 						slog.String("Key", peer.State.NeighborAddress.String()),
 						slog.String("Prefix", path.GetPrefix()))
 				}
-			} else if family == bgp.RF_IPv6_VPN {
+			case bgp.RF_IPv6_VPN:
 				// IPv6 VPN routes (VRF): use global + link-local nexthops from peer's interface
 				if info.IPv6Nexthop != nil && !info.IPv6Nexthop.IsUnspecified() {
 					nexthops := []net.IP{info.IPv6Nexthop}
@@ -399,7 +401,7 @@ func UpdatePathAttrs(logger *slog.Logger, global *oc.Global, peer *oc.Neighbor, 
 						slog.String("Key", peer.State.NeighborAddress.String()),
 						slog.String("Prefix", path.GetPrefix()))
 				}
-			} else if family == bgp.RF_IPv4_VPN {
+			case bgp.RF_IPv4_VPN:
 				// IPv4 VPN routes (VRF): use IPv4 nexthop from peer's interface
 				if info.IPv4Nexthop != nil && !info.IPv4Nexthop.IsUnspecified() {
 					path.SetNexthop(info.IPv4Nexthop)

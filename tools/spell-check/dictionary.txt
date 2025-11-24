@@ -4,6 +4,7 @@ aggregator
 aigp
 aspath
 apiutil
+attrs
 bgpd
 bsid
 cidr
