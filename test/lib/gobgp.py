@@ -128,12 +128,18 @@ class GoBGPContainer(BGPContainer):
         self.local("pkill -KILL gobgpd")
 
     def _start_zebra(self):
-        daemon_bin = '/usr/lib/quagga/zebra'
+        if self.zapi_version == 2:
+            daemon_bin = '/usr/lib/quagga/zebra'
+        else:
+            daemon_bin = 'zebra'
         cmd = '{0} -f {1}/zebra.conf'.format(daemon_bin, self.QUAGGA_VOLUME)
         self.local(cmd, detach=True)
 
     def _start_ospfd(self):
-        daemon_bin = '/usr/lib/quagga/ospfd'
+        if self.zapi_version == 2:
+            daemon_bin = '/usr/lib/quagga/ospfd'
+        else:
+            daemon_bin = 'ospfd'
         cmd = '{0} -f {1}/ospfd.conf'.format(daemon_bin, self.QUAGGA_VOLUME)
         self.local(cmd, detach=True)
 
