@@ -255,8 +255,8 @@ func UpdatePathAttrs(logger *slog.Logger, global *oc.Global, peer *oc.Neighbor, 
 		if isNetlink {
 			family := path.GetFamily()
 			switch family {
-			case bgp.RF_IPv6_UC:
-				// IPv6 routes: use global + link-local nexthops from peer's interface
+			case bgp.RF_IPv6_UC, bgp.RF_IPv6_VPN:
+				// IPv6 routes (unicast or VPN/VRF): use global + link-local nexthops from peer's interface
 				if info.IPv6Nexthop != nil && !info.IPv6Nexthop.IsUnspecified() {
 					nexthops := []net.IP{info.IPv6Nexthop}
 					if info.IPv6LinkLocalNexthop != nil && !info.IPv6LinkLocalNexthop.IsUnspecified() {
@@ -275,8 +275,8 @@ func UpdatePathAttrs(logger *slog.Logger, global *oc.Global, peer *oc.Neighbor, 
 						slog.String("Key", peer.State.NeighborAddress.String()),
 						slog.String("Prefix", path.GetPrefix()))
 				}
-			case bgp.RF_IPv4_UC:
-				// IPv4 routes: use IPv4 nexthop from peer's interface
+			case bgp.RF_IPv4_UC, bgp.RF_IPv4_VPN:
+				// IPv4 routes (unicast or VPN/VRF): use IPv4 nexthop from peer's interface
 				if info.IPv4Nexthop != nil && !info.IPv4Nexthop.IsUnspecified() {
 					path.SetNexthop(info.IPv4Nexthop)
 				} else {
@@ -313,8 +313,8 @@ func UpdatePathAttrs(logger *slog.Logger, global *oc.Global, peer *oc.Neighbor, 
 		if path.GetSource().IsNetlink {
 			family := path.GetFamily()
 			switch family {
-			case bgp.RF_IPv6_UC:
-				// IPv6 routes: use global + link-local nexthops from peer's interface
+			case bgp.RF_IPv6_UC, bgp.RF_IPv6_VPN:
+				// IPv6 routes (unicast or VPN/VRF): use global + link-local nexthops from peer's interface
 				if info.IPv6Nexthop != nil && !info.IPv6Nexthop.IsUnspecified() {
 					nexthops := []net.IP{info.IPv6Nexthop}
 					if info.IPv6LinkLocalNexthop != nil && !info.IPv6LinkLocalNexthop.IsUnspecified() {
@@ -327,8 +327,8 @@ func UpdatePathAttrs(logger *slog.Logger, global *oc.Global, peer *oc.Neighbor, 
 						slog.String("Key", peer.State.NeighborAddress.String()),
 						slog.String("Prefix", path.GetPrefix()))
 				}
-			case bgp.RF_IPv4_UC:
-				// IPv4 routes: use IPv4 nexthop from peer's interface
+			case bgp.RF_IPv4_UC, bgp.RF_IPv4_VPN:
+				// IPv4 routes (unicast or VPN/VRF): use IPv4 nexthop from peer's interface
 				if info.IPv4Nexthop != nil && !info.IPv4Nexthop.IsUnspecified() {
 					path.SetNexthop(info.IPv4Nexthop)
 				} else {
